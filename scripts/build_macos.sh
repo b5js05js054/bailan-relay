@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 构建 macOS Universal（arm64 + amd64）.app 并打包为 zip。
 # 前置：macOS + Xcode CLT（cgo/clang、sips、iconutil、lipo、codesign、ditto）+ Go。
-# 产出：dist/bailan-relay-macOS-universal.zip 与 dist/bailan-relay-customer-macOS-universal.zip
+# 产出：dist/ 下标准版与客户版各一个 zip（自动更新用）+ 一个 dmg（手动安装用）
 set -euo pipefail
 set -x # CI 日志里保留每条命令，便于无 shell 环境排查
 cd "$(dirname "$0")/.."
@@ -63,7 +63,7 @@ build_edition() { # $1=产物名 $2=ldflags 追加
   lipo -archs "$1"
 }
 
-package_app() { # $1=二进制 $2=输出 zip
+package_app() { # $1=二进制 $2=输出 zip $3=输出 dmg
   APP="build/$APP_NAME.app"
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -91,14 +91,35 @@ package_app() { # $1=二进制 $2=输出 zip
 PLIST
   # 无开发者证书：做 ad-hoc 签名（arm64 必需；不公证，首次打开需右键“打开”）。
   codesign --force --sign - "$APP"
+  # zip 供自动更新下载解包；dmg 供用户手动安装（拖到“应用程序”）。
   ditto -c -k --sequesterRsrc --keepParent "$APP" "$2"
   echo "packaged: $2"
+  make_dmg "$APP" "$3"
+}
+
+make_dmg() { # $1=.app 路径 $2=输出 dmg
+  local root="build/dmg-root"
+  rm -rf "$root"
+  mkdir -p "$root"
+  ditto "$1" "$root/$(basename "$1")"
+  ln -s /Applications "$root/Applications"
+  # GitHub 的 macOS runner 上 hdiutil 偶发 “Resource busy”，重试几次。
+  local i
+  for i in 1 2 3 4 5; do
+    if hdiutil create -volname "$APP_NAME" -srcfolder "$root" -ov -format UDZO "$2"; then
+      echo "packaged: $2"
+      return 0
+    fi
+    sleep 5
+  done
+  echo "DMG 创建失败：$2" >&2
+  return 1
 }
 
 build_edition "build/universal-standard" ""
-package_app "build/universal-standard" "$DIST/bailan-relay-macOS-universal.zip"
+package_app "build/universal-standard" "$DIST/bailan-relay-macOS-universal.zip" "$DIST/bailan-relay-macOS-universal.dmg"
 
 build_edition "build/universal-customer" "-X bailan-relay/internal/config.Edition=customer"
-package_app "build/universal-customer" "$DIST/bailan-relay-customer-macOS-universal.zip"
+package_app "build/universal-customer" "$DIST/bailan-relay-customer-macOS-universal.zip" "$DIST/bailan-relay-customer-macOS-universal.dmg"
 
 ls -lh "$DIST"
