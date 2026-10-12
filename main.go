@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -120,7 +119,7 @@ func main() {
 			cleanup()
 			return
 		}
-		// WebView2 不可用：退回 Edge 应用窗口。
+		// 内嵌窗口不可用：退回浏览器打开。
 		openBrowser(url)
 	}
 	fmt.Println("白岚 Devin 中继已启动：" + url)
@@ -137,12 +136,6 @@ func main() {
 	cleanup()
 }
 
-func fatal(message string) {
-	fmt.Fprintln(os.Stderr, message)
-	_, _, _ = sysutil.RunHidden("cmd", "/c", "echo "+message)
-	os.Exit(2)
-}
-
 func listenControl() (net.Listener, string) {
 	addr := fmt.Sprintf("127.0.0.1:%d", preferredControlPort)
 	if ln, err := net.Listen("tcp", addr); err == nil {
@@ -153,26 +146,4 @@ func listenControl() (net.Listener, string) {
 		fatal("无法启动本地控制服务：" + err.Error())
 	}
 	return ln, ln.Addr().String()
-}
-
-// openBrowser 优先以 Edge 应用窗口打开，退回默认浏览器。
-func openBrowser(url string) {
-	for _, edge := range edgeCandidates() {
-		if _, err := os.Stat(edge); err == nil {
-			if sysutil.StartDetached("", edge, "--app="+url) == nil {
-				return
-			}
-		}
-	}
-	_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-}
-
-func edgeCandidates() []string {
-	var out []string
-	for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"} {
-		if base := os.Getenv(env); base != "" {
-			out = append(out, base+`\Microsoft\Edge\Application\msedge.exe`)
-		}
-	}
-	return out
 }

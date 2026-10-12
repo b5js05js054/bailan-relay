@@ -21,7 +21,6 @@ import (
 
 	"bailan-relay/internal/applog"
 	"bailan-relay/internal/netdns"
-	"bailan-relay/internal/sysutil"
 )
 
 // State 是持久化到磁盘的授权状态。
@@ -621,22 +620,6 @@ func deviceFingerprint() string {
 	seed := guid + "|" + hostname()
 	sum := sha256.Sum256([]byte(seed))
 	return hex.EncodeToString(sum[:])[:32]
-}
-
-func machineGUID() string {
-	out, _, err := sysutil.RunHidden("reg", "query",
-		`HKLM\SOFTWARE\Microsoft\Cryptography`, "/v", "MachineGuid")
-	if err == nil {
-		for _, line := range strings.Split(out, "\n") {
-			if strings.Contains(line, "MachineGuid") {
-				fields := strings.Fields(line)
-				if len(fields) > 0 {
-					return fields[len(fields)-1]
-				}
-			}
-		}
-	}
-	return ""
 }
 
 func hostname() string {

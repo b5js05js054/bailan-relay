@@ -3,7 +3,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -173,13 +172,6 @@ func ModelInCatalog(modelID string) bool {
 	return ok
 }
 
-// DefaultInterceptProcesses 默认监控/重启的进程名。
-var DefaultInterceptProcesses = []string{
-	"Devin.exe",
-	"devin.exe",
-	"language_server_windows_x64.exe",
-}
-
 // DefaultTargetDomains 内置目标域名（Devin/Windsurf/Codeium API）。
 var DefaultTargetDomains = []string{
 	"server.self-serve.windsurf.com",
@@ -247,7 +239,7 @@ func Default() Config {
 	return Config{
 		RelayServerURL:      "http://devin.exic.us.ci:5001",
 		InterceptProcess:    append([]string(nil), DefaultInterceptProcesses...),
-		DevinExecutable:     `E:\Devin\Devin.exe`,
+		DevinExecutable:     defaultDevinExecutable(),
 		TargetDomains:       append([]string(nil), DefaultTargetDomains...),
 		TargetPaths:         append([]string(nil), DefaultTargetPaths...),
 		RelayAuthToken:      "",
@@ -269,28 +261,14 @@ func LicenseStatePath() string { return filepath.Join(AppDir(), "license.json") 
 // UserStatePath 返回本地账号会话文件路径。
 func UserStatePath() string { return filepath.Join(AppDir(), "user.json") }
 
-var (
-	appDir     string
-	appDirOnce sync.Once
-	fileMu     sync.RWMutex
-)
+var fileMu sync.RWMutex
 
-// AppDir 返回配置/日志/证书的根目录：%LOCALAPPDATA%\BaiLan Proxy Manager。
-func AppDir() string {
-	appDirOnce.Do(func() {
-		base := os.Getenv("LOCALAPPDATA")
-		if base == "" {
-			home, _ := os.UserHomeDir()
-			base = filepath.Join(home, "AppData", "Local")
-		}
-		// 客户版使用独立数据目录，避免与完整版共用同一份 config.json 互相覆盖。
-		name := "BaiLan Proxy Manager"
-		if IsCustomer() {
-			name = "BaiLan Devin Relay Client"
-		}
-		appDir = filepath.Join(base, name)
-	})
-	return appDir
+// appDirName 客户版使用独立数据目录，避免与完整版共用同一份 config.json 互相覆盖。
+func appDirName() string {
+	if IsCustomer() {
+		return "BaiLan Devin Relay Client"
+	}
+	return "BaiLan Proxy Manager"
 }
 
 // ConfigPath 返回 config.json 的绝对路径。
@@ -307,15 +285,6 @@ func CertFile() string { return filepath.Join(CertDir(), "bailan-ca-cert.cer") }
 
 // CertKeyFile 返回 CA 私钥路径。
 func CertKeyFile() string { return filepath.Join(CertDir(), "bailan-ca-key.pem") }
-
-// HostsPath 返回 Windows hosts 文件路径。
-func HostsPath() string {
-	root := os.Getenv("SystemRoot")
-	if root == "" {
-		root = `C:\Windows`
-	}
-	return filepath.Join(root, "System32", "drivers", "etc", "hosts")
-}
 
 var domainRe = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$`)
 

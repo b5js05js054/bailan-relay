@@ -1,5 +1,5 @@
 // Package certstore 负责本地根 CA 的生成/加载、按 SNI 动态签发叶子证书，
-// 以及通过 certutil 安装/卸载到 Windows 根证书存储。
+// 以及安装/卸载到系统根证书存储（Windows: certutil；macOS: security 钥匙串）。
 // 取代旧版对 mitmproxy CA 的依赖。
 package certstore
 
@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"bailan-relay/internal/config"
-	"bailan-relay/internal/sysutil"
 )
 
 // CA 持有根证书与私钥，并缓存已签发的叶子证书。
@@ -149,29 +148,6 @@ func (c *CA) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error
 func FileExists() bool {
 	_, err := os.Stat(config.CertFile())
 	return err == nil
-}
-
-// IsInstalled 通过 certutil 检查 CA 是否已装入 Root 存储。
-func IsInstalled() (bool, string) {
-	out, code, _ := sysutil.RunHidden("certutil", "-verifystore", "Root", config.CertCN())
-	return code == 0, out
-}
-
-// Install 生成缺失的证书后，把 CA 写入 Windows Root 存储。
-func Install() (bool, string) {
-	if !FileExists() {
-		if _, err := LoadOrCreate(); err != nil {
-			return false, "证书自动生成失败：" + err.Error()
-		}
-	}
-	out, code, _ := sysutil.RunHidden("certutil", "-addstore", "Root", config.CertFile())
-	return code == 0, out
-}
-
-// Uninstall 从 Windows Root 存储移除 CA。
-func Uninstall() (bool, string) {
-	out, code, _ := sysutil.RunHidden("certutil", "-delstore", "Root", config.CertCN())
-	return code == 0, out
 }
 
 // CertPath 返回 CA 证书文件路径（供 UI 显示）。

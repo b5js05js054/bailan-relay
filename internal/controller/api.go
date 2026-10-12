@@ -225,7 +225,7 @@ func (c *Controller) apiScanProcesses(args []any) any {
 	executable := strings.TrimSpace(mapString(payload, "devin_executable"))
 	found := devin.DiscoverExecutable(executable)
 	if found == "" {
-		return map[string]any{"ok": false, "message": "没有找到 Devin.exe，请手动选择程序路径"}
+		return map[string]any{"ok": false, "message": "没有找到 Devin 程序，请手动选择程序路径"}
 	}
 	merged := devin.DiscoverInterceptProcesses(found)
 	cfg := config.Save(func(x *config.Config) {
@@ -507,7 +507,7 @@ func (c *Controller) apiOpenURL(args []any) any {
 	if !strings.HasPrefix(raw, "https://") && !strings.HasPrefix(raw, "http://") {
 		return map[string]any{"ok": false, "message": "仅支持打开网页链接"}
 	}
-	if err := sysutil.StartDetached("", "rundll32", "url.dll,FileProtocolHandler", raw); err != nil {
+	if err := sysutil.OpenURL(raw); err != nil {
 		return map[string]any{"ok": false, "message": "无法打开链接：" + err.Error()}
 	}
 	return map[string]any{"ok": true, "message": "已在浏览器打开"}

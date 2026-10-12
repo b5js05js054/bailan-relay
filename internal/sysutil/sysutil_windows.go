@@ -121,6 +121,16 @@ func Taskkill(args ...string) (string, int, error) {
 	return RunHidden("taskkill", append([]string{"/F"}, args...)...)
 }
 
+// KillImage 按映像名强制结束进程（含子进程），供平台无关代码调用。
+func KillImage(imageName string) (string, int, error) {
+	return RunHidden("taskkill", "/F", "/T", "/IM", imageName)
+}
+
+// OpenURL 用系统默认浏览器打开链接。
+func OpenURL(raw string) error {
+	return StartDetached("", "rundll32", "url.dll,FileProtocolHandler", raw)
+}
+
 // StartDetached 以隐藏窗口方式在指定目录启动一个不阻塞的进程。
 func StartDetached(dir, name string, args ...string) error {
 	cmd := exec.Command(name, args...)

@@ -1,0 +1,13 @@
+# CI 脚本必须保持 LF（Windows checkout 出 CRLF 会让 bash/python 直接炸）。
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yml  text eol=lf
+*.bat  text eol=crlf
+*.go   text eol=lf
+*.md   text eol=lf
+
+*.ico  binary
+*.png  binary
+*.icns binary
+*.exe  binary
+*.syso binary

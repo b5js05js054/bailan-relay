@@ -1,0 +1,32 @@
+name: build-macos
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    # arm64 原生机：cgo 走 clang -arch 交叉出 amd64，lipo 合成 Universal。
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./internal/...
+
+      - name: Build universal .app
+        run: bash scripts/build_macos.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: dist/*.zip
+          if-no-files-found: error

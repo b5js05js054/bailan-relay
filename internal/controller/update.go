@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"bailan-relay/internal/config"
-	"bailan-relay/internal/sysutil"
 )
 
 // clientAnnouncement 是后台下发到客户端的公告。
@@ -283,6 +282,9 @@ func (c *Controller) apiApplyUpdate([]any) any {
 	if upd.URL == "" {
 		return fail("后台未配置更新下载地址")
 	}
+	if !selfUpdateSupported {
+		return fail("Mac 版暂不支持自动更新，请获取新版安装包后手动替换")
+	}
 	if !strings.HasPrefix(upd.URL, "https://") && !strings.HasPrefix(upd.URL, "http://") {
 		return fail("更新下载地址仅支持 http/https")
 	}
@@ -300,8 +302,7 @@ func (c *Controller) apiApplyUpdate([]any) any {
 		}
 		return '-'
 	}, upd.Version)
-	tmpDir := os.TempDir()
-	newExe := filepath.Join(tmpDir, "bailan-relay-"+safeVersion+".exe")
+	newExe := filepath.Join(os.TempDir(), "bailan-relay-"+safeVersion+".exe")
 	var downloadedBytes, totalBytes int64
 	if err := c.downloadUpdate(upd.URL, newExe, upd.SHA256, func(downloaded, total int64) {
 		downloadedBytes, totalBytes = downloaded, total
@@ -325,18 +326,8 @@ func (c *Controller) apiApplyUpdate([]any) any {
 	}
 	c.setUpdateProgress(updateProgressView{Active: true, Phase: "installing", Downloaded: downloadedBytes, Total: totalBytes, Percent: 99, Message: "下载完成，正在准备安装…"})
 
-	scriptPath := filepath.Join(tmpDir, "bailan-relay-update-"+safeVersion+".ps1")
-	if err := os.WriteFile(scriptPath, []byte(updateScript), 0o600); err != nil {
-		return fail("无法写入更新脚本：" + err.Error())
-	}
-	args := []string{
-		"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
-		"-WaitPid", strconv.Itoa(os.Getpid()),
-		"-Source", newExe,
-		"-Target", exePath,
-	}
-	if err := sysutil.StartDetached("", "powershell.exe", args...); err != nil {
-		return fail("无法启动更新程序：" + err.Error())
+	if err := installUpdate(newExe, exePath, safeVersion); err != nil {
+		return fail(err.Error())
 	}
 	c.setUpdateProgress(updateProgressView{Phase: "ready", Downloaded: downloadedBytes, Total: totalBytes, Percent: 100, Message: "更新包已下载，正在重启…"})
 	c.log.Log(fmt.Sprintf("[更新] 已下载更新包 %s，准备退出并更新到 %s", newExe, upd.Version))
@@ -407,28 +398,3 @@ func (w *downloadProgressWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-
-// updateScript 等待当前进程退出后覆盖 exe 并重新启动。
-const updateScript = `param(
-    [int]$WaitPid,
-    [string]$Source,
-    [string]$Target
-)
-$ErrorActionPreference = 'Stop'
-while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
-    Start-Sleep -Milliseconds 500
-}
-$deadline = (Get-Date).AddMinutes(2)
-while ($true) {
-    try {
-        Copy-Item -LiteralPath $Source -Destination $Target -Force
-        break
-    } catch {
-        if ((Get-Date) -gt $deadline) { throw }
-        Start-Sleep -Milliseconds 500
-    }
-}
-Start-Process -FilePath $Target -WorkingDirectory (Split-Path -Path $Target -Parent)
-Remove-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-`
