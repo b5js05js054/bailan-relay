@@ -9,7 +9,17 @@ cd "$(dirname "$0")/.."
 APP_NAME="Devin_hub"
 BUNDLE_ID="com.bailan.devin-relay"
 EXE="bailan-relay"
-VERSION="1.0.0"
+# 版本号：优先取 CI 传入的 APP_VERSION（tag 名 v1.2.4 或手动输入），否则沿用源码里的默认值。
+VERSION="${APP_VERSION:-}"
+VERSION="${VERSION#v}"
+if [ -z "$VERSION" ]; then
+  VERSION="$(sed -n 's/^var AppVersion = "\(.*\)"$/\1/p' internal/config/config.go)"
+fi
+if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]]; then
+  echo "非法版本号：'$VERSION'（格式如 1.2.4）" >&2
+  exit 1
+fi
+VERSION_LDFLAGS="-X bailan-relay/internal/config.AppVersion=$VERSION"
 DIST="dist"
 export MACOSX_DEPLOYMENT_TARGET=12.0
 
@@ -47,7 +57,7 @@ build_edition() { # $1=产物名 $2=ldflags 追加
     mkdir -p "build/$arch"
     CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" \
       CC="clang -arch $clang_arch" CXX="clang++ -arch $clang_arch" \
-      go build -trimpath -ldflags "-s -w $2" -o "build/$arch/$EXE" .
+      go build -trimpath -ldflags "-s -w $VERSION_LDFLAGS $2" -o "build/$arch/$EXE" .
   done
   lipo "build/arm64/$EXE" "build/amd64/$EXE" -create -output "$1"
   lipo -archs "$1"

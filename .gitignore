@@ -8,3 +8,4 @@ _smoke_*.json
 .tmp_uitest/
 artifacts/
 UI素材/
+__pycache__/

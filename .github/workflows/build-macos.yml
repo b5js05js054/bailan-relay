@@ -3,9 +3,16 @@ name: build-macos
 on:
   push:
     branches: [main]
+    # 推送 v1.2.4 这类 tag 时，以 tag 作为程序版本号出包。
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: '程序版本号（如 1.2.4），留空沿用源码默认值'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -22,6 +29,8 @@ jobs:
         run: go test ./internal/...
 
       - name: Build universal .app
+        env:
+          APP_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
         run: bash scripts/build_macos.sh
 
       - name: Upload artifacts
