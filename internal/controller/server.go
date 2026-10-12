@@ -63,6 +63,7 @@ func (c *Controller) routes() map[string]func([]any) any {
 		"user_clear_background":   c.apiUserClearBackground,
 		"user_logout":             c.apiUserLogout,
 		"user_upload_progress":    c.apiUserUploadProgress,
+		"pick_image":              c.apiPickImage,
 	}
 }
 

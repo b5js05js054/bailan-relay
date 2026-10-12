@@ -4,7 +4,6 @@ package devin
 
 import (
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -92,23 +91,10 @@ func launch(app string) error {
 	if !sysutil.IsAdmin() {
 		return sysutil.StartDetached(filepath.Dir(app), cmd[0], cmd[1:]...)
 	}
-	u, err := guiUser()
+	u, err := sysutil.GUIUser()
 	if err != nil {
 		return err
 	}
 	args := append([]string{"asuser", u.Uid, "sudo", "-u", u.Username, "-H"}, cmd...)
 	return sysutil.StartDetached(filepath.Dir(app), "launchctl", args...)
-}
-
-// guiUser 返回应当运行 Devin 的真实用户：提权前的用户，否则当前控制台登录用户。
-func guiUser() (*user.User, error) {
-	name := os.Getenv("SUDO_USER")
-	if name == "" || name == "root" {
-		out, _, err := sysutil.RunHidden("stat", "-f", "%Su", "/dev/console")
-		if err != nil {
-			return nil, err
-		}
-		name = strings.TrimSpace(out)
-	}
-	return user.Lookup(name)
 }

@@ -121,17 +121,36 @@ async function withUploadProgress(run) {
     }
 }
 
-async function handleAvatarPick(event) {
+// pickImage 输入：用作提示语的标签、网页 file input。输出：{name, type, size, dataUrl} 或 null（取消/失败已提示）。
+// macOS 的 WKWebView 在 root 运行时弹不出文件面板，改走 Go 侧系统文件框；其他平台用网页 file input。
+async function pickImage(label, input) {
+    if (state.platform !== "darwin" || !state.native) {
+        input.click();
+        return null;
+    }
+    const result = await callApi("pick_image", `选择${label}`);
+    if (result?.ok) return { name: result.name, type: result.type, size: result.size, dataUrl: result.data_url };
+    if (!result?.cancelled) throw new Error(result?.message || "读取图片失败");
+    return null;
+}
+
+// fileImage 输入：file input 的 change 事件。输出：与 pickImage 相同结构的图片对象或 null。
+async function fileImage(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
-    const problem = checkImage(file, AVATAR_MAX, "头像");
+    if (!file) return null;
+    return { name: file.name, type: file.type, size: file.size, file };
+}
+
+async function handleAvatarPick(image) {
+    if (!image) return;
+    const problem = checkImage(image, AVATAR_MAX, "头像");
     if (problem) {
         setAuthError(problem);
         return;
     }
-    const dataUrl = await readAsDataURL(file);
-    accountState.avatar = { dataUrl, name: file.name };
+    const dataUrl = image.dataUrl || await readAsDataURL(image.file);
+    accountState.avatar = { dataUrl, name: image.name };
     paintAvatar($("#avatarPreview"), dataUrl);
     $("#authProgress").hidden = true;
     setAuthError("");
@@ -191,18 +210,17 @@ function applyAccountResult(result) {
 }
 
 // handleBackgroundPick 选图后交给 Go 侧保存到本地（按账号区分），不上传服务器。
-async function handleBackgroundPick(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    const problem = checkImage(file, BACKGROUND_MAX, "背景图");
+async function handleBackgroundPick(image) {
+    if (!image) return;
+    const problem = checkImage(image, BACKGROUND_MAX, "背景图");
     if (problem) {
         toast(problem, "error");
         return;
     }
     setUserMenuOpen(false);
     try {
-        applyAccountResult(await callApi("user_set_background", { image: await readAsDataURL(file) }));
+        const dataUrl = image.dataUrl || await readAsDataURL(image.file);
+        applyAccountResult(await callApi("user_set_background", { image: dataUrl }));
     } catch (error) {
         toast(`更换背景失败：${errorMessage(error)}`, "error");
     }
@@ -234,9 +252,24 @@ async function handleLogout() {
 function bindAccountEvents() {
     $$("[data-auth-mode]").forEach((btn) => btn.addEventListener("click", () => setAuthMode(btn.dataset.authMode)));
     $("#authForm").addEventListener("submit", handleAuthSubmit);
-    $("#avatarInput").addEventListener("change", handleAvatarPick);
-    $("#changeBgBtn").addEventListener("click", () => $("#bgFileInput").click());
-    $("#bgFileInput").addEventListener("change", handleBackgroundPick);
+    $("#avatarInput").addEventListener("change", async (e) => handleAvatarPick(await fileImage(e)));
+    $("#avatarPicker").addEventListener("click", async (e) => {
+        if (state.platform !== "darwin" || !state.native) return;
+        e.preventDefault();
+        try {
+            await handleAvatarPick(await pickImage("头像", $("#avatarInput")));
+        } catch (error) {
+            setAuthError(errorMessage(error));
+        }
+    });
+    $("#changeBgBtn").addEventListener("click", async () => {
+        try {
+            await handleBackgroundPick(await pickImage("背景图", $("#bgFileInput")));
+        } catch (error) {
+            toast(`更换背景失败：${errorMessage(error)}`, "error");
+        }
+    });
+    $("#bgFileInput").addEventListener("change", async (e) => handleBackgroundPick(await fileImage(e)));
     $("#resetBgBtn").addEventListener("click", handleResetBackground);
     $("#logoutBtn").addEventListener("click", handleLogout);
 }

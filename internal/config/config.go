@@ -17,7 +17,7 @@ const UIVersion = "3.0"
 
 // AppVersion 客户端程序版本号，用于远程更新检查。
 // 可通过链接期注入：-ldflags "-X bailan-relay/internal/config.AppVersion=1.0.1"
-var AppVersion = "1.2.3"
+var AppVersion = "1.2.4"
 
 // Edition 区分构建版本：
 //   - "full"     完整版（默认，开发/自用，展示全部信息）

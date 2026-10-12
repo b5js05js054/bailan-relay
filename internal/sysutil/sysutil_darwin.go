@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -141,20 +142,53 @@ func OpenURL(raw string) error {
 
 // OpenExeDialog 弹出系统文件选择框（.app），返回所选路径。取消返回错误。
 func OpenExeDialog(current string) (string, error) {
-	script := `POSIX path of (choose file with prompt "选择 Devin 程序" of type {"app"}`
-	if dir := filepath.Dir(strings.TrimSpace(current)); dir != "" && dir != "." {
+	dir := filepath.Dir(strings.TrimSpace(current))
+	path, err := ChooseFile("选择 Devin 程序", []string{"app"}, dir)
+	return strings.TrimSuffix(path, "/"), err
+}
+
+// ChooseFile 弹出系统文件选择框并返回所选文件的 POSIX 路径；取消返回错误。
+// 输入：提示语、允许的类型（扩展名或 UTI，空=不限）、默认目录（不存在则忽略）。
+// 本程序以 root 运行时 WKWebView/osascript 的面板不会出现在用户桌面上，
+// 因此经 launchctl asuser + sudo -u 回到登录用户的 GUI 会话里弹框。
+func ChooseFile(prompt string, types []string, dir string) (string, error) {
+	script := `activate` + "\n" + `POSIX path of (choose file with prompt "` + escapeAppleScript(prompt) + `"`
+	if len(types) > 0 {
+		quoted := make([]string, len(types))
+		for i, t := range types {
+			quoted[i] = `"` + escapeAppleScript(t) + `"`
+		}
+		script += ` of type {` + strings.Join(quoted, ",") + `}`
+	}
+	if dir != "" && dir != "." {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			script += ` default location POSIX file "` + escapeAppleScript(dir) + `"`
 		}
 	}
 	script += ")"
-	out, code, err := RunHidden("osascript", "-e", script)
-	if err != nil || code != 0 {
-		return "", errors.New("未选择文件")
+	name, args := "osascript", []string{"-e", script}
+	if IsAdmin() {
+		if u, err := GUIUser(); err == nil && u.Uid != "0" {
+			name, args = "launchctl", append([]string{"asuser", u.Uid, "sudo", "-u", u.Username, "-H", "osascript"}, args...)
+		}
 	}
+	out, code, err := RunHidden(name, args...)
 	path := strings.TrimSpace(out)
-	if path == "" {
+	if err != nil || code != 0 || !strings.HasPrefix(path, "/") {
 		return "", errors.New("未选择文件")
 	}
-	return strings.TrimSuffix(path, "/"), nil
+	return path, nil
+}
+
+// GUIUser 返回当前桌面的真实用户：提权前的用户，否则当前控制台登录用户。
+func GUIUser() (*user.User, error) {
+	name := os.Getenv("SUDO_USER")
+	if name == "" || name == "root" {
+		out, _, err := RunHidden("stat", "-f", "%Su", "/dev/console")
+		if err != nil {
+			return nil, err
+		}
+		name = strings.TrimSpace(out)
+	}
+	return user.Lookup(name)
 }

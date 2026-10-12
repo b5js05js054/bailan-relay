@@ -2352,6 +2352,7 @@ async function bootstrap() {
         state.models = Array.isArray(data.models) ? data.models : [];
         state.catalogSynced = Boolean(data.catalog_synced);
         applyEdition(data.edition);
+        state.platform = data.platform || "";
         $("#uiVersion").textContent = `UI ${data.ui_version || "3.0"} · v${data.app_version || "—"}`;
         renderAnnouncement(data.announcement || null);
         renderUpdate(data.update || null);

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ func (c *Controller) apiGetBootstrap([]any) any {
 		"ui_version":     config.UIVersion,
 		"app_version":    config.AppVersion,
 		"edition":        config.Edition,
+		"platform":       runtime.GOOS,
 		"admin":          sysutil.IsAdmin(),
 		"config_path":    config.ConfigPath(),
 		"cert_path":      certstore.CertPath(),
