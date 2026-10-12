@@ -1,0 +1,10 @@
+/bailan-relay.exe
+*.exe
+_out_*.json
+_smoke_*.json
+
+# 本地工作区 / 构建产物 / 设计素材不入库
+.bailan/
+.tmp_uitest/
+artifacts/
+UI素材/
