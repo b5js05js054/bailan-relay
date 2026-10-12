@@ -11,7 +11,15 @@ import (
 	"bailan-relay/internal/sysutil"
 )
 
-const selfUpdateSupported = true
+// platformUpdateSource Windows 使用后台配置的通用下载地址。
+func platformUpdateSource(upd *clientUpdate) (string, string, bool) {
+	return upd.URL, upd.SHA256, true
+}
+
+// updatePackagePath 返回 Windows 更新包（单个 exe）的本机落盘路径。
+func updatePackagePath(safeVersion string) string {
+	return filepath.Join(os.TempDir(), "bailan-relay-"+safeVersion+".exe")
+}
 
 // installUpdate 写出替换脚本并以独立进程启动：等本进程退出后覆盖 exe 并重启。
 // 输入：已下载的新 exe、当前 exe 路径、清洗后的版本号；输出：启动失败的原因。

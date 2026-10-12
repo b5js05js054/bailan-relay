@@ -27,12 +27,14 @@ type clientAnnouncement struct {
 
 // clientUpdate 是后台下发到客户端的软件更新配置。
 type clientUpdate struct {
-	Enabled   *bool  `json:"enabled"`
-	Version   string `json:"version"`
-	URL       string `json:"url"`
-	SHA256    string `json:"sha256"`
-	Mandatory bool   `json:"mandatory"`
-	Note      string `json:"note"`
+	Enabled     *bool  `json:"enabled"`
+	Version     string `json:"version"`
+	URL         string `json:"url"`
+	SHA256      string `json:"sha256"`
+	URLMacOS    string `json:"url_macos"`
+	SHA256MacOS string `json:"sha256_macos"`
+	Mandatory   bool   `json:"mandatory"`
+	Note        string `json:"note"`
 }
 
 type clientBundle struct {
@@ -198,24 +200,28 @@ func normalizeUpdate(in *clientUpdate) *clientUpdate {
 		return nil
 	}
 	return &clientUpdate{
-		Version:   version,
-		URL:       strings.TrimSpace(in.URL),
-		SHA256:    strings.ToLower(strings.TrimSpace(in.SHA256)),
-		Mandatory: in.Mandatory,
-		Note:      strings.TrimSpace(in.Note),
+		Version:     version,
+		URL:         strings.TrimSpace(in.URL),
+		SHA256:      strings.ToLower(strings.TrimSpace(in.SHA256)),
+		URLMacOS:    strings.TrimSpace(in.URLMacOS),
+		SHA256MacOS: strings.ToLower(strings.TrimSpace(in.SHA256MacOS)),
+		Mandatory:   in.Mandatory,
+		Note:        strings.TrimSpace(in.Note),
 	}
 }
 
+// buildUpdateView 生成前端展示用的更新信息，下载地址按当前平台选取。
 func buildUpdateView(upd *clientUpdate) *updateView {
 	if upd == nil {
 		return nil
 	}
+	url, sha256, supported := platformUpdateSource(upd)
 	return &updateView{
 		Version:   upd.Version,
-		URL:       upd.URL,
-		SHA256:    upd.SHA256,
+		URL:       url,
+		SHA256:    sha256,
 		Mandatory: upd.Mandatory,
-		HasUpdate: compareVersions(config.AppVersion, upd.Version) < 0,
+		HasUpdate: supported && compareVersions(config.AppVersion, upd.Version) < 0,
 		Current:   config.AppVersion,
 		Note:      upd.Note,
 	}
@@ -282,9 +288,6 @@ func (c *Controller) apiApplyUpdate([]any) any {
 	if upd.URL == "" {
 		return fail("后台未配置更新下载地址")
 	}
-	if !selfUpdateSupported {
-		return fail("Mac 版暂不支持自动更新，请获取新版安装包后手动替换")
-	}
 	if !strings.HasPrefix(upd.URL, "https://") && !strings.HasPrefix(upd.URL, "http://") {
 		return fail("更新下载地址仅支持 http/https")
 	}
@@ -302,9 +305,10 @@ func (c *Controller) apiApplyUpdate([]any) any {
 		}
 		return '-'
 	}, upd.Version)
-	newExe := filepath.Join(os.TempDir(), "bailan-relay-"+safeVersion+".exe")
+	// 更新包形式与落盘路径按平台决定（Windows 单 exe；macOS 内含 .app 的 zip）。
+	newPkg := updatePackagePath(safeVersion)
 	var downloadedBytes, totalBytes int64
-	if err := c.downloadUpdate(upd.URL, newExe, upd.SHA256, func(downloaded, total int64) {
+	if err := c.downloadUpdate(upd.URL, newPkg, upd.SHA256, func(downloaded, total int64) {
 		downloadedBytes, totalBytes = downloaded, total
 		percent := 0.0
 		if total > 0 {
@@ -326,11 +330,11 @@ func (c *Controller) apiApplyUpdate([]any) any {
 	}
 	c.setUpdateProgress(updateProgressView{Active: true, Phase: "installing", Downloaded: downloadedBytes, Total: totalBytes, Percent: 99, Message: "下载完成，正在准备安装…"})
 
-	if err := installUpdate(newExe, exePath, safeVersion); err != nil {
+	if err := installUpdate(newPkg, exePath, safeVersion); err != nil {
 		return fail(err.Error())
 	}
 	c.setUpdateProgress(updateProgressView{Phase: "ready", Downloaded: downloadedBytes, Total: totalBytes, Percent: 100, Message: "更新包已下载，正在重启…"})
-	c.log.Log(fmt.Sprintf("[更新] 已下载更新包 %s，准备退出并更新到 %s", newExe, upd.Version))
+	c.log.Log(fmt.Sprintf("[更新] 已下载更新包 %s，准备退出并更新到 %s", newPkg, upd.Version))
 	go func() {
 		time.Sleep(700 * time.Millisecond)
 		c.Shutdown()
