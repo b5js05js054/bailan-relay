@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"bailan-relay/internal/config"
 )
 
 // IsAdmin 返回当前进程是否具有管理员（root）权限。
@@ -22,24 +24,49 @@ func IsAdmin() bool { return os.Geteuid() == 0 }
 // Elevate 以管理员身份重新启动当前程序，成功发起返回 true。
 // macOS 无 UAC：用 osascript 的 administrator privileges 弹系统授权框，
 // 并把发起提权的真实用户信息透传给新进程，避免数据写进 /var/root。
+//
+// 关键点：本程序必须拿到 root 才能绑定 127.0.0.1:443，但 root 进程默认落在
+// 系统会话里，连不上 WindowServer —— 表现为授权后进程静默退出、窗口永远不出现。
+// 因此经 launchctl asuser 把 root 进程放回登录用户的 GUI 会话（root 身份不变）。
 func Elevate(args []string) bool {
 	exe, err := os.Executable()
 	if err != nil {
 		return false
 	}
-	parts := []string{
-		"BAILAN_USER_HOME=" + shellQuote(realUserHome()),
-		"SUDO_USER=" + shellQuote(realUserName()),
-		"nohup",
-		shellQuote(exe),
+	// 取不到桌面用户（如纯 SSH 会话）时 uid 为空，退回普通提权。
+	uid := ""
+	if u, err := GUIUser(); err == nil && u.Uid != "0" {
+		uid = u.Uid
 	}
-	for _, a := range args {
-		parts = append(parts, shellQuote(a))
-	}
-	command := strings.Join(parts, " ") + " >/dev/null 2>&1 &"
+	command := elevatedCommand(exe, args, uid, realUserHome(), realUserName(), config.LogDir())
 	script := "do shell script \"" + escapeAppleScript(command) + "\" with administrator privileges"
 	_, code, err := RunHidden("osascript", "-e", script)
 	return err == nil && code == 0
+}
+
+// elevatedCommand 拼出提权重启用的 shell 命令。
+// 输入：可执行文件路径、原样透传的命令行参数、桌面用户 uid（空=退回普通提权）、
+// 真实用户主目录与用户名、日志目录；
+// 输出：mkdir -p <日志目录> && launchctl asuser <uid> env <变量> nohup <exe> <参数> >> <日志> 2>&1 &
+// uid 非空时把 root 进程放进该用户的 GUI 会话（root 身份不变），否则窗口无法出现。
+// 提权进程的 stdout/stderr 落到日志文件，授权后窗口没出现时可据此排查。
+func elevatedCommand(exe string, args []string, uid, home, name, logDir string) string {
+	inner := []string{
+		"/usr/bin/env",
+		"BAILAN_USER_HOME=" + shellQuote(home),
+		"SUDO_USER=" + shellQuote(name),
+		"/usr/bin/nohup",
+		shellQuote(exe),
+	}
+	for _, a := range args {
+		inner = append(inner, shellQuote(a))
+	}
+	if uid != "" {
+		inner = append([]string{"/bin/launchctl", "asuser", uid}, inner...)
+	}
+	logPath := filepath.Join(logDir, "elevate.log")
+	return "/bin/mkdir -p " + shellQuote(logDir) + " && " +
+		strings.Join(inner, " ") + " >>" + shellQuote(logPath) + " 2>&1 &"
 }
 
 // realUserHome 返回发起提权的真实用户主目录（提权后为 /var/root 时回溯）。
@@ -47,14 +74,28 @@ func realUserHome() string {
 	if home := os.Getenv("BAILAN_USER_HOME"); home != "" {
 		return home
 	}
+	if name := os.Getenv("SUDO_USER"); name != "" && name != "root" {
+		if u, err := user.Lookup(name); err == nil && u.HomeDir != "" {
+			return u.HomeDir
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" && home != "/var/root" {
+		return home
+	}
+	if u, err := GUIUser(); err == nil && u.HomeDir != "" {
+		return u.HomeDir
+	}
 	home, _ := os.UserHomeDir()
 	return home
 }
 
 // realUserName 返回发起提权的真实用户名。
 func realUserName() string {
-	if name := os.Getenv("SUDO_USER"); name != "" {
+	if name := os.Getenv("SUDO_USER"); name != "" && name != "root" {
 		return name
+	}
+	if u, err := GUIUser(); err == nil && u.Username != "" {
+		return u.Username
 	}
 	return os.Getenv("USER")
 }
@@ -136,7 +177,14 @@ func StartDetached(dir, name string, args ...string) error {
 }
 
 // OpenURL 用系统默认浏览器打开链接。
+// 以 root 运行时浏览器必须由登录用户拉起：root 身份或系统会话下打开的窗口
+// 不会出现在用户桌面上（表现为「点了没反应」），故经 launchctl asuser 降回用户身份。
 func OpenURL(raw string) error {
+	if IsAdmin() {
+		if u, err := GUIUser(); err == nil && u.Uid != "0" {
+			return StartDetached("", "launchctl", "asuser", u.Uid, "sudo", "-u", u.Username, "-H", "open", raw)
+		}
+	}
 	return StartDetached("", "open", raw)
 }
 
