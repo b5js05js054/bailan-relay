@@ -3,6 +3,7 @@
 # 前置：macOS + Xcode CLT（cgo/clang、sips、iconutil、lipo、codesign、ditto）+ Go。
 # 产出：dist/bailan-relay-macOS-universal.zip 与 dist/bailan-relay-customer-macOS-universal.zip
 set -euo pipefail
+set -x # CI 日志里保留每条命令，便于无 shell 环境排查
 cd "$(dirname "$0")/.."
 
 APP_NAME="Devin_hub"
@@ -10,7 +11,7 @@ BUNDLE_ID="com.bailan.devin-relay"
 EXE="bailan-relay"
 VERSION="1.0.0"
 DIST="dist"
-MACOSX_DEPLOYMENT_TARGET=12.0
+export MACOSX_DEPLOYMENT_TARGET=12.0
 
 rm -rf build "$DIST"
 mkdir -p build "$DIST"
@@ -18,26 +19,38 @@ mkdir -p build "$DIST"
 # icon.ico -> PNG -> 全尺寸 iconset -> AppIcon.icns
 python3 scripts/ico_to_png.py icon.ico build/icon_256.png
 ICONSET="build/Icon.iconset"
-mkdir -p "$ICONSET"
+mkdir -p build/icons "$ICONSET"
 for size in 16 32 64 128 256 512 1024; do
-  sips -z "$size" "$size" build/icon_256.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z "$size" "$size" build/icon_256.png --out "build/icons/$size.png" >/dev/null
 done
-cp "$ICONSET/icon_32x32.png" "$ICONSET/icon_16x16@2x.png"
-cp "$ICONSET/icon_64x64.png" "$ICONSET/icon_32x32@2x.png"
-cp "$ICONSET/icon_256x256.png" "$ICONSET/icon_128x128@2x.png"
-cp "$ICONSET/icon_512x512.png" "$ICONSET/icon_256x256@2x.png"
-cp "$ICONSET/icon_1024x1024.png" "$ICONSET/icon_512x512@2x.png"
+# iconset 只放 Apple 规定的文件名，多余条目会让 iconutil 直接报错。
+cp build/icons/16.png   "$ICONSET/icon_16x16.png"
+cp build/icons/32.png   "$ICONSET/icon_16x16@2x.png"
+cp build/icons/32.png   "$ICONSET/icon_32x32.png"
+cp build/icons/64.png   "$ICONSET/icon_32x32@2x.png"
+cp build/icons/128.png  "$ICONSET/icon_128x128.png"
+cp build/icons/256.png  "$ICONSET/icon_128x128@2x.png"
+cp build/icons/256.png  "$ICONSET/icon_256x256.png"
+cp build/icons/512.png  "$ICONSET/icon_256x256@2x.png"
+cp build/icons/512.png  "$ICONSET/icon_512x512.png"
+cp build/icons/1024.png "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET" -o build/AppIcon.icns
 
 # 按 edition 构建两个 Universal 二进制：单架构 cgo 交叉编译后 lipo 合并。
-build_edition() { # $1=标准版产物名 $2=ldflags 追加
+# 注意 clang 的架构名与 GOARCH 不同：amd64 -> x86_64。
+build_edition() { # $1=产物名 $2=ldflags 追加
   for arch in arm64 amd64; do
+    case "$arch" in
+      arm64) clang_arch=arm64 ;;
+      amd64) clang_arch=x86_64 ;;
+    esac
     mkdir -p "build/$arch"
     CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" \
-      CC="clang -arch $arch" CXX="clang++ -arch $arch" \
+      CC="clang -arch $clang_arch" CXX="clang++ -arch $clang_arch" \
       go build -trimpath -ldflags "-s -w $2" -o "build/$arch/$EXE" .
   done
   lipo "build/arm64/$EXE" "build/amd64/$EXE" -create -output "$1"
+  lipo -archs "$1"
 }
 
 package_app() { # $1=二进制 $2=输出 zip
