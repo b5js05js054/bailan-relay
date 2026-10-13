@@ -29,6 +29,9 @@ function renderAccount(account) {
     $("#userMenuEmail").textContent = user?.email || "未登录";
     paintAvatar($("#userChipAvatar"), user?.avatar_url);
     paintAvatar($("#userMenuAvatar"), user?.avatar_url);
+    const brandMark = $("#brandMark");
+    brandMark.classList.toggle("has-image", Boolean(user?.avatar_url));
+    brandMark.style.backgroundImage = user?.avatar_url ? `url("${user.avatar_url}")` : "";
     const bg = user?.background_url || "";
     document.body.classList.toggle("has-custom-bg", Boolean(bg));
     document.body.style.setProperty("--user-bg", bg ? `url("${bg}")` : "none");

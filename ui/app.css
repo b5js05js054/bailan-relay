@@ -113,6 +113,8 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
     color: var(--accent-ink); background: var(--accent); border-radius: 50%;
 }
 .brand-mark svg { width: 19px; height: 19px; stroke-width: 2.2; }
+.brand-mark.has-image { background: var(--card-3) center / cover no-repeat; }
+.brand-mark.has-image svg { display: none; }
 .brand-copy { display: flex; align-items: baseline; gap: 8px; line-height: 1.2; }
 .brand-copy strong { font-size: 15px; font-weight: 700; letter-spacing: .06em; }
 .brand-copy span { color: var(--muted); font-size: 12px; white-space: nowrap; }
