@@ -721,6 +721,10 @@ svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; s
     display: inline-block; margin-right: 6px; padding: 0 7px; color: var(--warn); background: var(--warn-soft);
     border-radius: 999px; font: 600 11px/18px var(--font); vertical-align: 1px;
 }
+.usage-free {
+    display: inline-block; padding: 0 7px; color: var(--ok); background: var(--ok-soft);
+    border-radius: 999px; font: 600 11px/18px var(--font); font-style: normal; vertical-align: 1px;
+}
 .usage-empty-row td { padding: 30px 12px; color: var(--faint); text-align: center; }
 .usage-pager { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 14px; color: var(--muted); font-size: 12.5px; }
 .usage-pager-controls { display: flex; align-items: center; gap: 10px; }

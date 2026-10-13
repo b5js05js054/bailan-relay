@@ -74,11 +74,16 @@ func hostResolverRules() string {
 }
 
 // chromiumArgs 返回启动 Devin 时追加的 Chromium 参数（关 QUIC/DoH + 本机解析规则）。
+// 输出：参数列表（macOS 直接作 argv；Windows 经 windowsArgs 拼成命令行）。
+// Devin main.js 启动时会用 *.localhost 规则覆盖 --host-resolver-rules，NetworkService 收不到我们的值；
+// --host-rules 不被改写、会原样传给 NetworkService，所以两个开关都带上。
 func chromiumArgs() []string {
+	rules := strings.ReplaceAll(hostResolverRules(), `"`, "")
 	return []string{
 		"--disable-quic",
 		"--disable-features=DnsOverHttps,AsyncDns",
-		"--host-resolver-rules=" + strings.ReplaceAll(hostResolverRules(), `"`, ""),
+		"--host-rules=" + rules,
+		"--host-resolver-rules=" + rules,
 	}
 }
 

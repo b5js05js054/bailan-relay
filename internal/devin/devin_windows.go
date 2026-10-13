@@ -197,11 +197,13 @@ func writeLauncher(devinExe string) (string, error) {
 	return launcher, nil
 }
 
-// windowsArgs 把 Chromium 参数拼成 cmd 命令行（host-resolver-rules 值含空格需加引号）。
+// windowsArgs 把 Chromium 参数拼成 cmd 命令行；输出：启动脚本用的参数串（值含空格的开关加引号）。
 func windowsArgs() string {
 	args := chromiumArgs()
-	last := len(args) - 1
-	k, v, _ := strings.Cut(args[last], "=")
-	args[last] = k + `="` + v + `"`
+	for i, arg := range args {
+		if k, v, ok := strings.Cut(arg, "="); ok && strings.Contains(v, " ") {
+			args[i] = k + `="` + v + `"`
+		}
+	}
 	return strings.Join(args, " ")
 }

@@ -447,6 +447,7 @@
                                 <small>今日花费</small>
                                 <strong class="usage-stat-value" id="usageTodayCost">—</strong>
                                 <span class="usage-stat-sub" id="usageTodayRequests">0 次请求</span>
+                                <span class="usage-stat-sub" id="usageFreeSplit">免费 — · 付费 —</span>
                             </div>
                             <div class="usage-stat">
                                 <small>总 Token</small>
@@ -467,8 +468,12 @@
 
                         <article class="panel usage-chart-panel">
                             <div class="panel-header">
-                                <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-chart"/></svg>累计花费</h3></div>
-                                <span class="usage-caption">按天累计 · 分模型</span>
+                                <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-chart"/></svg><span id="usageChartTitle">累计花费</span></h3></div>
+                                <div class="segment-control" id="usageMetric" aria-label="图表指标">
+                                    <button class="active" type="button" data-usage-metric="cost">花费</button>
+                                    <button type="button" data-usage-metric="tokens">Token</button>
+                                    <button type="button" data-usage-metric="calls">调用次数</button>
+                                </div>
                             </div>
                             <p class="usage-range-text" id="usageRangeText">—</p>
                             <div class="usage-chart" id="usageChartWrap">

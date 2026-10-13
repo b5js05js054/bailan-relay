@@ -278,11 +278,20 @@ const mockApi = {
         inRange.forEach((item) => {
             let series = byModel.get(item.model);
             if (!series) {
-                series = { model: item.model, label: item.label, cost: 0, daily: new Array(days).fill(0) };
+                series = {
+                    model: item.model, label: item.label, free: item.free, cost: 0, total_calls: 0, total_tokens: 0,
+                    daily: new Array(days).fill(0), calls: new Array(days).fill(0), tokens: new Array(days).fill(0),
+                };
                 byModel.set(item.model, series);
             }
+            const i = dateIndex.get(beijingDate(Date.parse(item.time)));
+            const tokens = item.prompt_tokens + item.completion_tokens;
             series.cost += item.cost;
-            series.daily[dateIndex.get(beijingDate(Date.parse(item.time)))] += item.cost;
+            series.daily[i] += item.cost;
+            series.calls[i] += 1;
+            series.tokens[i] += tokens;
+            series.total_calls += 1;
+            series.total_tokens += tokens;
         });
         const series = [...byModel.values()]
             .sort((a, b) => b.cost - a.cost)
@@ -295,6 +304,10 @@ const mockApi = {
             const pin = MOCK_USAGE_MODELS.find((model) => model.model === item.model)?.pin || 0;
             return total + (item.cache_read_tokens * pin * 0.9) / 1e6;
         }, 0);
+        const tokensOf = (list) => sum(list, "prompt_tokens") + sum(list, "completion_tokens");
+        const freeAll = all.filter((item) => item.free);
+        const freeRange = inRange.filter((item) => item.free);
+        const paidRange = inRange.filter((item) => !item.free);
         return {
             ok: true,
             data: {
@@ -304,14 +317,16 @@ const mockApi = {
                 balance: Number(lic.balance || 0),
                 summary: {
                     total_cost: round6(sum(all, "cost")), total_requests: all.length,
-                    today_cost: round6(sum(today, "cost")), today_requests: today.length,
+                    free_requests: freeAll.length, paid_requests: all.length - freeAll.length,
+                    today_cost: round6(sum(today, "cost")), today_requests: today.length, today_tokens: tokensOf(today),
                     total_tokens: prompt + completion, prompt_tokens: prompt, completion_tokens: completion,
                     cache_read_tokens: cacheRead, cache_write_tokens: 0,
                     cache_hit_rate: prompt ? cacheRead / prompt : 0, cache_saved: round6(saved),
                 },
                 range: {
                     days, start: dates[0], end: dates.at(-1), cost: round6(sum(inRange, "cost")), requests: inRange.length,
-                    tokens: sum(inRange, "prompt_tokens") + sum(inRange, "completion_tokens"),
+                    tokens: tokensOf(inRange), free_requests: freeRange.length, paid_requests: paidRange.length,
+                    free_tokens: tokensOf(freeRange), paid_tokens: tokensOf(paidRange),
                 },
                 chart: { dates, series },
                 records: { total: inRange.length, page, page_size: pageSize, items: inRange.slice((page - 1) * pageSize, page * pageSize) },
@@ -329,8 +344,8 @@ const MOCK_USAGE_MODELS = [
     { model: "gpt-5-2-codex", label: "GPT-5.2 Codex", weight: 5, pin: 1.25, pout: 10 },
     { model: "gemini-3-pro", label: "Gemini 3 Pro", weight: 4, pin: 2, pout: 12 },
     { model: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", weight: 4, pin: 3, pout: 15 },
-    { model: "glm-5-2-pro", label: "GLM-5.2 Pro", weight: 2, pin: 0.6, pout: 2.2 },
-    { model: "kimi-k3", label: "Kimi K3", weight: 1, pin: 0.6, pout: 2.5 },
+    { model: "glm-5-2-pro", label: "GLM-5.2 Pro", weight: 6, pin: 0, pout: 0, free: true },
+    { model: "kimi-k3", label: "Kimi K3", weight: 5, pin: 0, pout: 0, free: true },
 ];
 
 function beijingDate(ms) {
@@ -371,7 +386,7 @@ function mockUsageRecords() {
             const cost = ((prompt - cacheRead) * model.pin + cacheRead * model.pin * 0.1 + completion * model.pout) / 1e6;
             records.push({
                 time: new Date(dayStart + rand() * span).toISOString(),
-                model: model.model, label: model.label,
+                model: model.model, label: model.label, free: Boolean(model.free),
                 prompt_tokens: prompt, completion_tokens: completion, cache_read_tokens: cacheRead, cache_write_tokens: 0,
                 cost: Number(cost.toFixed(6)), estimated: rand() < 0.08,
             });
@@ -658,11 +673,35 @@ function modelCaps(model) {
     return caps.join(" · ");
 }
 
+// 模型系列分类规则：按 ID/展示名前缀归组，数组顺序即菜单分组顺序，未命中统一归「其他」。
+const MODEL_SERIES = [
+    { title: "Claude 系列", prefixes: ["claude", "anthropic"] },
+    { title: "千问 Qwen", prefixes: ["qwen", "qwq", "qvq", "tongyi"] },
+    { title: "小米 MiMo", prefixes: ["mimo", "xiaomi"] },
+    { title: "Kimi", prefixes: ["kimi", "moonshot"] },
+    { title: "GLM", prefixes: ["glm", "chatglm", "zhipu"] },
+];
+
+// 输入：模型；输出：命中的系列标题，未识别返回空串（由调用方归入「其他」）。
+function modelSeriesTitle(model) {
+    const id = String(model?.id || "").toLowerCase();
+    const label = String(model?.label || "").toLowerCase();
+    for (const series of MODEL_SERIES) {
+        if (series.prefixes.some((prefix) => id.startsWith(prefix) || label.startsWith(prefix))) return series.title;
+    }
+    return "";
+}
+
+// 输入：无（读 state.models）；输出：按厂商系列分组的有序数组 [{ title, models }]，
+// 组内保持后台目录顺序，空组剔除，「其他」固定垫底。
 function groupedModels() {
-    const free = [];
-    const paid = [];
-    state.models.forEach((model) => (isFreeModel(model) ? free : paid).push(model));
-    return { free, paid };
+    const groups = MODEL_SERIES.map((series) => ({ title: series.title, models: [] }));
+    groups.push({ title: "其他", models: [] });
+    state.models.forEach((model) => {
+        const title = modelSeriesTitle(model) || "其他";
+        groups.find((group) => group.title === title).models.push(model);
+    });
+    return groups.filter((group) => group.models.length);
 }
 
 // 模型已被后台隐藏/删除：目录已从后台同步成功，且所选模型不在目录里。
@@ -833,8 +872,8 @@ function appendPickerGroup(menu, title, models, selected) {
 }
 
 function populateModels(selected) {
-    const { free, paid } = groupedModels();
-    const ordered = [...free, ...paid];
+    const groups = groupedModels();
+    const ordered = groups.flatMap((group) => group.models);
     for (const select of [$("#homeModel"), $("#configModel")]) {
         if (!select) continue;
         select.replaceChildren();
@@ -850,8 +889,7 @@ function populateModels(selected) {
         const menu = getModelPickerMenu(picker);
         if (!menu) return;
         menu.replaceChildren();
-        appendPickerGroup(menu, "免费", free, selected);
-        appendPickerGroup(menu, "收费", paid, selected);
+        groups.forEach((group) => appendPickerGroup(menu, group.title, group.models, selected));
         paintPickerTrigger(picker, selected);
     });
     $("#routeTarget").textContent = selected || "—";
@@ -1482,7 +1520,14 @@ const USAGE_OTHER_COLOR = "#8b929c";
 const USAGE_MAX_SERIES = 7;
 const USAGE_REFRESH_MS = 60000;
 
-const usageState = { days: 30, page: 1, pageSize: 20, data: null, seq: 0, chart: null };
+const usageState = { days: 30, page: 1, pageSize: 20, data: null, seq: 0, chart: null, metric: "cost" };
+
+/** 图表指标：values 为后端 series 中按天的数组字段，total 为排序/图例用的合计字段（free 模型花费为 0，需切到 Token/次数才看得到）。 */
+const USAGE_METRICS = {
+    cost: { title: "累计花费", values: "daily", total: "cost", format: (v, digits) => formatMoney(v, digits) },
+    tokens: { title: "累计 Token", values: "tokens", total: "total_tokens", format: (v) => formatTokens(v) },
+    calls: { title: "累计调用次数", values: "calls", total: "total_calls", format: (v) => formatInt(v) },
+};
 
 function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -1594,7 +1639,9 @@ function renderUsage(data) {
     $("#usageTotalRecords").textContent = `共 ${formatInt(summary.total_requests)} 条记录`;
     $("#usageCacheSaved").textContent = `缓存节省 ${formatMoney(summary.cache_saved)}`;
     $("#usageTodayCost").textContent = formatMoney(summary.today_cost);
-    $("#usageTodayRequests").textContent = `${formatInt(summary.today_requests)} 次请求`;
+    $("#usageTodayRequests").textContent = `${formatInt(summary.today_requests)} 次请求 · ${formatTokens(summary.today_tokens)} Token`;
+    const freeRequests = Number(summary.free_requests) || 0;
+    $("#usageFreeSplit").textContent = `累计免费 ${formatInt(freeRequests)} 次 · 付费 ${formatInt(summary.paid_requests ?? (summary.total_requests || 0) - freeRequests)} 次`;
     $("#usageTotalTokens").textContent = formatTokens(summary.total_tokens);
     $("#usageTokenSplit").textContent = `输入 ${formatTokens(summary.prompt_tokens)} · 输出 ${formatTokens(summary.completion_tokens)}`;
     const rate = Math.min(1, Math.max(0, Number(summary.cache_hit_rate) || 0));
@@ -1603,18 +1650,23 @@ function renderUsage(data) {
 
     const range = data.range || {};
     $("#usageRangeText").textContent = range.start
-        ? `近 ${range.days || usageState.days} 天（${range.start} 至 ${range.end}）· 花费 ${formatMoney(range.cost)} · ${formatInt(range.requests)} 次请求 · ${formatTokens(range.tokens)} Token`
+        ? `近 ${range.days || usageState.days} 天（${range.start} 至 ${range.end}）· 花费 ${formatMoney(range.cost)} · ${formatInt(range.requests)} 次请求（免费 ${formatInt(range.free_requests)} / 付费 ${formatInt(range.paid_requests)}）· ${formatTokens(range.tokens)} Token（免费 ${formatTokens(range.free_tokens)} / 付费 ${formatTokens(range.paid_tokens)}）`
         : `近 ${usageState.days} 天`;
     renderUsageChart(data.chart);
     renderUsageRecords(data.records);
 }
 
-/** 取前 7 个模型（按花费降序），其余合并为「其他」；附带颜色与累计序列。 */
-function usageChartSeries(chart) {
+/**
+ * 按当前指标取前 7 个模型（合计降序，0 值模型不画），其余合并为「其他」。
+ * 输入：后端 chart {dates, series[]}；输出：{dates, series[{label, total, values, color, cumulative}]}。
+ */
+function usageChartSeries(chart, metric = USAGE_METRICS[usageState.metric]) {
     const dates = Array.isArray(chart?.dates) ? chart.dates : [];
     const sorted = (Array.isArray(chart?.series) ? chart.series : [])
-        .filter((item) => Array.isArray(item?.daily))
-        .sort((a, b) => (Number(b.cost) || 0) - (Number(a.cost) || 0));
+        .filter((item) => Array.isArray(item?.[metric.values]))
+        .map((item) => ({ ...item, total: Number(item[metric.total]) || 0, values: item[metric.values] }))
+        .filter((item) => item.total > 0)
+        .sort((a, b) => b.total - a.total);
     let list = sorted;
     if (sorted.length > USAGE_MAX_SERIES) {
         const rest = sorted.slice(USAGE_MAX_SERIES);
@@ -1622,8 +1674,9 @@ function usageChartSeries(chart) {
             model: `${rest.length} 个模型`,
             label: "其他",
             other: true,
-            cost: rest.reduce((total, item) => total + (Number(item.cost) || 0), 0),
-            daily: dates.map((_, i) => rest.reduce((total, item) => total + (Number(item.daily[i]) || 0), 0)),
+            free: rest.every((item) => item.free),
+            total: rest.reduce((total, item) => total + item.total, 0),
+            values: dates.map((_, i) => rest.reduce((total, item) => total + (Number(item.values[i]) || 0), 0)),
         }];
     }
     const series = list.map((item, index) => {
@@ -1631,7 +1684,7 @@ function usageChartSeries(chart) {
         return {
             ...item,
             color: item.other ? USAGE_OTHER_COLOR : USAGE_PALETTE[index % USAGE_PALETTE.length],
-            cumulative: dates.map((_, i) => (running += Number(item.daily[i]) || 0)),
+            cumulative: dates.map((_, i) => (running += Number(item.values[i]) || 0)),
         };
     });
     return { dates, series };
@@ -1650,14 +1703,16 @@ function renderUsageLegend(series) {
     $("#usageLegend").innerHTML = series.map((item) => `
         <li title="${escapeHtml(item.model || item.label)}">
             <i style="background:${item.color}"></i>
-            <span><strong>${escapeHtml(item.label || item.model)}</strong><small>${escapeHtml(formatMoney(item.cost))}</small></span>
+            <span><strong>${escapeHtml(item.label || item.model)}${item.free ? ` <em class="usage-free">免费</em>` : ""}</strong><small>${escapeHtml(USAGE_METRICS[usageState.metric].format(item.total))}</small></span>
         </li>`).join("");
 }
 
 function renderUsageChart(chart) {
     const wrap = $("#usageChartWrap");
     const svg = $("#usageChart");
-    const { dates, series } = usageChartSeries(chart);
+    const metric = USAGE_METRICS[usageState.metric];
+    $("#usageChartTitle").textContent = metric.title;
+    const { dates, series } = usageChartSeries(chart, metric);
     const hasData = dates.length > 0 && series.length > 0;
     $("#usageChartEmpty").hidden = hasData;
     renderUsageLegend(hasData ? series : []);
@@ -1676,7 +1731,7 @@ function renderUsageChart(chart) {
     const { step, top } = usageNiceScale(Math.max(...stacked.at(-1)));
     let digits = 2;
     while (digits < 6 && Math.abs(Math.round(step * 10 ** digits) - step * 10 ** digits) > 1e-6) digits += 1;
-    const ticks = [0, 1, 2, 3, 4].map((k) => ({ value: step * k, label: formatMoney(step * k, digits) }));
+    const ticks = [0, 1, 2, 3, 4].map((k) => ({ value: step * k, label: metric.format(step * k, digits) }));
     const padL = Math.max(44, Math.max(...ticks.map((tick) => tick.label.length)) * 6.8 + 12);
     const padR = 12;
     const padT = 10;
@@ -1753,10 +1808,11 @@ function onUsageChartMove(event) {
     });
 
     const tooltip = $("#usageTooltip");
+    const { format } = USAGE_METRICS[usageState.metric];
     const rows = geo.series.map((item) => `
-        <div class="usage-tip-row"><i style="background:${item.color}"></i><span>${escapeHtml(item.label || item.model)}</span><b>${escapeHtml(formatMoney(item.cumulative[j]))}</b></div>`).join("");
+        <div class="usage-tip-row"><i style="background:${item.color}"></i><span>${escapeHtml(item.label || item.model)}</span><b>${escapeHtml(format(item.cumulative[j]))}</b></div>`).join("");
     tooltip.innerHTML = `<strong>${escapeHtml(geo.dates[j])}</strong>${rows}
-        <div class="usage-tip-row total"><i></i><span>累计合计</span><b>${escapeHtml(formatMoney(geo.stacked.at(-1)[j]))}</b></div>`;
+        <div class="usage-tip-row total"><i></i><span>累计合计</span><b>${escapeHtml(format(geo.stacked.at(-1)[j]))}</b></div>`;
     tooltip.hidden = false;
     const px = gx / scale;
     const width = tooltip.offsetWidth;
@@ -1784,7 +1840,7 @@ function renderUsageRecords(records) {
                 <td class="num">${formatInt(item.prompt_tokens)}</td>
                 <td class="num">${formatInt(item.cache_read_tokens)}</td>
                 <td class="num">${formatInt(item.completion_tokens)}</td>
-                <td class="num cost">${estimated}${escapeHtml(formatRecordCost(item.cost))}</td>
+                <td class="num cost">${estimated}${item.free ? `<span class="usage-free">免费</span>` : escapeHtml(formatRecordCost(item.cost))}</td>
             </tr>`;
         }).join("")
         : `<tr class="usage-empty-row"><td colspan="6">所选时间范围内暂无调用记录</td></tr>`;
@@ -2291,6 +2347,11 @@ function bindEvents() {
         }
     });
     if ($("#usageRefreshBtn")) $("#usageRefreshBtn").addEventListener("click", () => loadUsage());
+    $$("[data-usage-metric]").forEach((button) => button.addEventListener("click", () => {
+        usageState.metric = button.dataset.usageMetric;
+        $$("[data-usage-metric]").forEach((item) => item.classList.toggle("active", item === button));
+        if (usageState.data) renderUsageChart(usageState.data.chart);
+    }));
     $$("[data-usage-days]").forEach((button) => button.addEventListener("click", () => {
         const days = Number(button.dataset.usageDays);
         if (days === usageState.days && usageState.data) return;
