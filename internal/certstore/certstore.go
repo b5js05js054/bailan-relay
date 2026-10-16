@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -152,3 +153,25 @@ func FileExists() bool {
 
 // CertPath 返回 CA 证书文件路径（供 UI 显示）。
 func CertPath() string { return filepath.Clean(config.CertFile()) }
+
+// EnsureInstalled 已信任则跳过，否则安装。输出：(是否已就绪, 日志文案)。
+func EnsureInstalled() (bool, string) {
+	if ok, _ := IsInstalled(); ok {
+		return true, "根证书已在系统信任库中"
+	}
+	if ok, msg := Install(); !ok {
+		return false, "根证书自动安装失败：" + strings.TrimSpace(msg)
+	}
+	return true, "根证书已自动安装到系统信任库"
+}
+
+// AutoUninstall 卸载根证书并返回日志文案（未安装视为成功）。
+func AutoUninstall() string {
+	if ok, _ := IsInstalled(); !ok {
+		return "根证书未安装，无需卸载"
+	}
+	if ok, msg := Uninstall(); !ok {
+		return "根证书自动卸载失败：" + strings.TrimSpace(msg)
+	}
+	return "根证书已从系统信任库卸载"
+}

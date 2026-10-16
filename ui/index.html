@@ -93,6 +93,30 @@
             </nav>
 
             <div class="topbar-tools">
+                <div class="license-chip-wrap">
+                    <button class="license-chip" id="licenseChip" type="button" aria-haspopup="true" aria-expanded="false" title="卡密授权：点击查看详情 / 充值" hidden>
+                        <svg aria-hidden="true"><use href="#i-key"/></svg>
+                        <span id="licenseChipDays">已授权</span>
+                        <strong id="licenseChipBalance" hidden></strong>
+                    </button>
+                    <div class="license-pop" id="licensePop" hidden>
+                        <div class="license-pop-head">
+                            <strong>卡密授权</strong>
+                            <span class="badge success">已授权</span>
+                        </div>
+                        <div class="license-meta" id="licenseMeta" hidden>
+                            <span id="licenseCode">—</span>
+                            <span id="licenseExpiry">—</span>
+                            <span id="licenseBalance" hidden title="高级模型按倍率从余额扣费；免费模型不消耗余额">余额 —</span>
+                            <button class="inline-action" id="changeLicenseBtn" type="button">更换卡密</button>
+                        </div>
+                        <div class="license-form license-redeem" id="licenseRedeem" hidden>
+                            <input class="text-input" id="redeemInput" type="text" placeholder="充值码（TP-XXXX…）" autocomplete="off" spellcheck="false" />
+                            <button class="button control-primary" id="redeemBtn" type="button"><span>充值</span></button>
+                        </div>
+                    </div>
+                </div>
+
                 <button class="hb-mini" id="hbMini" type="button" data-state="idle" title="网络心跳：点击查看详情" aria-label="网络心跳">
                     <svg class="hb-mini-icon" aria-hidden="true"><use href="#i-pulse"/></svg>
                     <span>延迟</span>
@@ -239,16 +263,6 @@
                             <input class="text-input" id="licenseInput" type="text" placeholder="请输入卡密，例如 A2C4-K7M9-XXXX-XXXX" autocomplete="off" spellcheck="false" />
                             <button class="button control-primary" id="activateLicenseBtn" type="button"><span>激活</span></button>
                         </div>
-                        <div class="license-meta" id="licenseMeta" hidden>
-                            <span id="licenseCode">—</span>
-                            <span id="licenseExpiry">—</span>
-                            <span id="licenseBalance" hidden title="高级模型按倍率从余额扣费；免费模型不消耗余额">余额 —</span>
-                            <button class="inline-action" id="changeLicenseBtn" type="button">更换卡密</button>
-                        </div>
-                        <div class="license-form license-redeem" id="licenseRedeem" hidden>
-                            <input class="text-input" id="redeemInput" type="text" placeholder="输入充值码（TP-XXXX…）为高级模型充值余额" autocomplete="off" spellcheck="false" />
-                            <button class="button control-primary" id="redeemBtn" type="button"><span>充值</span></button>
-                        </div>
                     </article>
                     <article class="status-board" id="statusBoard" data-state="checking">
                         <div class="status-main">
@@ -345,42 +359,39 @@
                         </dl>
                     </article>
 
-                    <div class="dashboard-grid">
-                        <article class="panel option-panel">
-                            <div class="panel-header">
-                                <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-refresh"/></svg>启动选项</h3></div>
-                            </div>
-                            <label class="setting-row" for="restartToggle">
-                                <span class="setting-icon"><svg><use href="#i-refresh"/></svg></span>
-                                <span class="setting-copy"><strong>重启 Devin</strong><small>代理就绪后重启应用，确保新连接进入拦截。</small></span>
-                                <span class="switch"><input id="restartToggle" type="checkbox"><span></span></span>
-                            </label>
-                        </article>
-
-                        <article class="panel route-panel">
-                            <div class="panel-header">
-                                <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-route"/></svg>模型路由</h3></div>
-                            </div>
-                            <p class="panel-description">仅替换 Devin 发出的 SWE-1.6 系列请求。可选模型由后台下发，免费/收费以徽标为准。</p>
-                            <label class="field-label" id="homeModelLabel">指定上游模型</label>
-                            <div class="model-picker" id="homeModelPicker" data-persist="true">
-                                <button class="model-picker-trigger" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="homeModelLabel">
-                                    <span class="model-picker-copy">
-                                        <strong class="model-picker-name">—</strong>
-                                        <small class="model-picker-meta">选择要替换到的上游模型</small>
-                                    </span>
-                                    <span class="billing-chip" data-tier="paid">收费</span>
-                                    <svg class="model-picker-caret"><use href="#i-chevron"/></svg>
-                                </button>
-                                <div class="model-picker-menu" role="listbox" hidden></div>
-                                <select id="homeModel" class="visually-hidden" tabindex="-1"></select>
-                            </div>
+                    <article class="panel route-panel">
+                        <div class="panel-header">
+                            <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-route"/></svg>模型路由</h3></div>
                             <div class="route-preview">
                                 <span>SWE-1.6</span><svg><use href="#i-arrow"/></svg><strong id="routeTarget">—</strong>
                                 <span class="billing-chip" id="routeBilling" data-tier="paid">收费模型</span>
                             </div>
-                        </article>
-                    </div>
+                        </div>
+                        <div class="model-toolbar">
+                            <div class="segment-control model-tabs" id="modelTabs" aria-label="模型系列"></div>
+                            <label class="model-free-toggle" for="modelFreeOnly">
+                                <span class="switch"><input id="modelFreeOnly" type="checkbox"><span></span></span>仅免费
+                            </label>
+                            <label class="search-box" for="modelSearch">
+                                <svg><use href="#i-search"/></svg>
+                                <input id="modelSearch" type="search" placeholder="搜索模型名称或 ID" autocomplete="off">
+                            </label>
+                        </div>
+                        <div class="model-wall" id="modelWall" role="listbox" aria-label="上游模型"></div>
+                        <p class="preview-empty" id="modelWallEmpty" hidden>没有符合条件的模型。</p>
+                        <small class="model-wall-hint" id="modelWallHint">仅替换 Devin 发出的 SWE-1.6 系列请求。可选模型由后台下发。</small>
+                    </article>
+
+                    <article class="panel option-panel">
+                        <div class="panel-header">
+                            <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-refresh"/></svg>启动选项</h3></div>
+                        </div>
+                        <label class="setting-row" for="restartToggle">
+                            <span class="setting-icon"><svg><use href="#i-refresh"/></svg></span>
+                            <span class="setting-copy"><strong>重启 Devin</strong><small>代理就绪后重启应用，确保新连接进入拦截。</small></span>
+                            <span class="switch"><input id="restartToggle" type="checkbox"><span></span></span>
+                        </label>
+                    </article>
 
                     <article class="panel activity-panel">
                         <div class="panel-header">
@@ -497,7 +508,7 @@
                             <div class="usage-table-wrap">
                                 <table class="usage-table">
                                     <thead>
-                                        <tr><th>时间</th><th>模型</th><th class="num">输入</th><th class="num">缓存命中</th><th class="num">输出</th><th class="num">费用</th></tr>
+                                        <tr><th>时间</th><th>模型</th><th class="num" title="未命中缓存的新输入">输入</th><th class="num" title="缓存读 / 缓存写">缓存读/写</th><th class="num">输出</th><th class="num">费用</th></tr>
                                     </thead>
                                     <tbody id="usageRows"></tbody>
                                 </table>
@@ -604,24 +615,16 @@
                         <article class="form-section">
                             <div class="form-section-aside">
                                 <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-route"/></svg>模型路由</h3>
-                                <p>选择匹配请求应被替换到的上游模型。</p>
+                                <p>模型在工作台的模型墙中点选，即时生效。</p>
                             </div>
                             <div class="form-fields">
                                 <div class="form-field full">
-                                    <span>指定上游模型</span>
-                                    <div class="model-picker" id="configModelPicker">
-                                        <button class="model-picker-trigger" type="button" aria-expanded="false" aria-haspopup="listbox">
-                                            <span class="model-picker-copy">
-                                                <strong class="model-picker-name">—</strong>
-                                                <small class="model-picker-meta">选择要替换到的上游模型</small>
-                                            </span>
-                                            <span class="billing-chip" data-tier="paid">收费</span>
-                                            <svg class="model-picker-caret"><use href="#i-chevron"/></svg>
-                                        </button>
-                                        <div class="model-picker-menu" role="listbox" hidden></div>
-                                        <select id="configModel" class="visually-hidden" tabindex="-1"></select>
+                                    <span>当前上游模型</span>
+                                    <div class="model-current">
+                                        <strong id="configModelName">—</strong>
+                                        <span class="billing-chip" id="configModelBilling" data-tier="paid">收费</span>
+                                        <button class="field-action" id="gotoModelWallBtn" type="button">去工作台切换</button>
                                     </div>
-                                    <small id="configModelHint">只替换 SWE-1.6、SWE-1.6 Slow 与 Fast。可选模型均为免费：SWE-2 全系，以及 GLM-5.2。</small>
                                 </div>
                             </div>
                         </article>

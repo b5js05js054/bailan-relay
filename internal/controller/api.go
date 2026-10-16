@@ -388,10 +388,17 @@ func (c *Controller) apiStartProxy([]any) any {
 func (c *Controller) startProxyTask() {
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
-	defer func() { go c.refreshStatusData(false) }()
+	defer func() { go c.refreshStatusData(true) }()
 
 	cfg := config.Load()
 	c.proxy.UpdateConfig(cfg)
+	// 停止拦截时会卸载根证书，重新启动前补装，否则 TLS 握手全部失败。
+	certOK, certMsg := certstore.EnsureInstalled()
+	if !certOK {
+		c.failStart(certMsg)
+		return
+	}
+	c.log.Log("[Manager] " + certMsg)
 	c.log.Log("[Manager] 拦截方式: hosts → 127.0.0.1:443（原生 Go，无中间人）")
 	c.log.Log("[Manager] 目标域名: " + strings.Join(cfg.HijackDomains(), "、"))
 
@@ -485,9 +492,11 @@ func (c *Controller) stopProxyTask() {
 	if _, err := proxybypass.Restore(config.Load().HijackDomains()); err != nil {
 		c.log.Log("[Manager] 移除代理绕过条目失败：" + err.Error())
 	}
-	message := "拦截已停止，hosts 已恢复，" + devinMessage
+	certMsg := certstore.AutoUninstall()
+	c.log.Log("[Manager] " + certMsg)
+	message := "拦截已停止，hosts 已恢复，" + certMsg + "，" + devinMessage
 	if !ok {
-		message = "拦截已停止，但" + hostsMsg + "；" + devinMessage
+		message = "拦截已停止，但" + hostsMsg + "；" + certMsg + "；" + devinMessage
 	}
 	tone := "success"
 	if !devinClosed {
@@ -497,7 +506,7 @@ func (c *Controller) stopProxyTask() {
 	c.setProxyState("idle", message, boolPtr(false))
 	c.setNotice(message, tone, nil, false)
 	c.log.Log("[Manager] " + message)
-	go c.refreshStatusData(false)
+	go c.refreshStatusData(true)
 }
 
 func (c *Controller) apiOpenMitmweb([]any) any {

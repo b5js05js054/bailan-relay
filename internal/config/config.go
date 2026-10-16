@@ -17,7 +17,7 @@ const UIVersion = "3.0"
 
 // AppVersion 客户端程序版本号，用于远程更新检查。
 // 可通过链接期注入：-ldflags "-X bailan-relay/internal/config.AppVersion=1.0.1"
-var AppVersion = "1.2.6"
+var AppVersion = "1.2.7"
 
 // Edition 区分构建版本：
 //   - "full"     完整版（默认，开发/自用，展示全部信息）
@@ -237,7 +237,7 @@ type Config struct {
 // Default 返回一份默认配置（首次运行时写入磁盘）。
 func Default() Config {
 	return Config{
-		RelayServerURL:      "http://devin.exic.us.ci:5001",
+		RelayServerURL:      "http://devin.08879.cn:5001",
 		InterceptProcess:    append([]string(nil), DefaultInterceptProcesses...),
 		DevinExecutable:     defaultDevinExecutable(),
 		TargetDomains:       append([]string(nil), DefaultTargetDomains...),
@@ -253,7 +253,7 @@ func Default() Config {
 }
 
 // DefaultLicenseAPIURL 卡密授权管理系统默认地址（与中继同主机、独立端口）。
-const DefaultLicenseAPIURL = "http://devin.exic.us.ci:8000"
+const DefaultLicenseAPIURL = "http://devin.08879.cn:8000"
 
 // LicenseStatePath 返回本地授权状态文件路径。
 func LicenseStatePath() string { return filepath.Join(AppDir(), "license.json") }

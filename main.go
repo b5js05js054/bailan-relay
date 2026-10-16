@@ -67,6 +67,13 @@ func main() {
 	if err != nil {
 		fatal("初始化本地根证书失败：" + err.Error())
 	}
+	// 打开软件即自动信任根证书；退出时由 restoreSystem 卸载。
+	if sysutil.IsAdmin() {
+		go func() {
+			_, msg := certstore.EnsureInstalled()
+			logger.Log("[Manager] " + msg)
+		}()
+	}
 
 	resolver := netdns.New(func() []string { return config.Load().EffectiveDNSServers() })
 	proxy := proxysrv.New(ca, resolver, logger)
@@ -97,16 +104,19 @@ func main() {
 	url := "http://" + addr + "/"
 	logger.Log("[Manager] 控制台地址：" + url)
 
+	// restoreSystem 退出收尾：恢复 hosts、代理绕过列表，并卸载根证书。
+	restoreSystem := func() {
+		_, _ = hostsfile.Restore()
+		_, _ = proxybypass.Restore(config.Load().HijackDomains())
+		if sysutil.IsAdmin() {
+			logger.Log("[Manager] " + certstore.AutoUninstall())
+		}
+	}
 	cleanup := func() {
 		licenseMgr.Stop()
-		ctrl.Shutdown()
-		_, _ = hostsfile.Restore()
-		_, _ = proxybypass.Restore(config.Load().HijackDomains())
+		ctrl.Shutdown() // 内部触发 onExit -> restoreSystem（只执行一次）
 	}
-	ctrl.SetOnExit(func() {
-		_, _ = hostsfile.Restore()
-		_, _ = proxybypass.Restore(config.Load().HijackDomains())
-	})
+	ctrl.SetOnExit(restoreSystem)
 	sysutil.SetConsoleCleanup(cleanup)
 
 	if os.Getenv("BAILAN_NO_BROWSER") != "1" {

@@ -300,6 +300,7 @@ const mockApi = {
         const prompt = sum(all, "prompt_tokens");
         const completion = sum(all, "completion_tokens");
         const cacheRead = sum(all, "cache_read_tokens");
+        const cacheWrite = sum(all, "cache_write_tokens");
         const saved = all.reduce((total, item) => {
             const pin = MOCK_USAGE_MODELS.find((model) => model.model === item.model)?.pin || 0;
             return total + (item.cache_read_tokens * pin * 0.9) / 1e6;
@@ -320,7 +321,8 @@ const mockApi = {
                     free_requests: freeAll.length, paid_requests: all.length - freeAll.length,
                     today_cost: round6(sum(today, "cost")), today_requests: today.length, today_tokens: tokensOf(today),
                     total_tokens: prompt + completion, prompt_tokens: prompt, completion_tokens: completion,
-                    cache_read_tokens: cacheRead, cache_write_tokens: 0,
+                    input_tokens: Math.max(prompt - cacheRead - cacheWrite, 0),
+                    cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite,
                     cache_hit_rate: prompt ? cacheRead / prompt : 0, cache_saved: round6(saved),
                 },
                 range: {
@@ -381,13 +383,16 @@ function mockUsageRecords() {
         for (let i = 0; i < count; i += 1) {
             const model = pick();
             const prompt = Math.round(20000 + rand() * 180000);
-            const cacheRead = Math.round(prompt * (0.75 + rand() * 0.22));
+            const cacheWrite = rand() < 0.4 ? Math.round(prompt * rand() * 0.03) : 0;
+            const cacheRead = Math.round((prompt - cacheWrite) * (0.75 + rand() * 0.22));
             const completion = Math.round(300 + rand() * 6000);
-            const cost = ((prompt - cacheRead) * model.pin + cacheRead * model.pin * 0.1 + completion * model.pout) / 1e6;
+            const cost = ((prompt - cacheRead - cacheWrite) * model.pin + cacheRead * model.pin * 0.1 + cacheWrite * model.pin * 1.25 + completion * model.pout) / 1e6;
             records.push({
                 time: new Date(dayStart + rand() * span).toISOString(),
                 model: model.model, label: model.label, free: Boolean(model.free),
-                prompt_tokens: prompt, completion_tokens: completion, cache_read_tokens: cacheRead, cache_write_tokens: 0,
+                prompt_tokens: prompt, completion_tokens: completion,
+                input_tokens: Math.max(prompt - cacheRead - cacheWrite, 0),
+                cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite,
                 cost: Number(cost.toFixed(6)), estimated: rand() < 0.08,
             });
         }
@@ -724,13 +729,13 @@ function notifyModelMissing(modelId) {
 function updateRouteBilling(modelId) {
     const missing = isModelMissing(modelId);
     const free = isFreeModel(modelId);
-    const chip = $("#routeBilling");
-    if (chip) {
+    for (const chip of [$("#routeBilling"), $("#configModelBilling")]) {
         chip.textContent = missing ? "已下线" : (free ? "免费" : paidLabel(modelId));
         chip.dataset.tier = missing ? "gone" : (free ? "free" : "paid");
     }
-    const hint = $("#configModelHint");
+    const hint = $("#modelWallHint");
     if (hint) {
+        hint.classList.toggle("danger", missing);
         hint.textContent = missing
             ? "该模型已在后台下线或不存在，请重新选择模型，否则对话请求会被拒绝。"
             : free
@@ -739,171 +744,87 @@ function updateRouteBilling(modelId) {
     }
 }
 
-// 输入：模型选择器；输出：选择器对应的菜单，菜单挂到 body 后仍可定位。
-function getModelPickerMenu(picker) {
-    return picker._modelPickerMenu || $(".model-picker-menu", picker);
-}
+// 模型墙筛选状态：系列标签与「仅免费」持久化到 localStorage，搜索词仅本次有效。
+const MODEL_WALL_KEY = "bailan.modelWall";
+const modelWall = loadModelWallPrefs();
 
-// 输入：模型选择器与菜单；输出：菜单恢复到选择器内部并保持原有 DOM 顺序。
-function restoreModelPickerMenu(picker, menu) {
-    if (!menu || menu.parentElement === picker) return;
-    const select = $("select", picker);
-    picker.insertBefore(menu, select || null);
-}
-
-function closeModelPickers(except) {
-    $$(".model-picker").forEach((picker) => {
-        if (picker === except) return;
-        picker.classList.remove("open");
-        const trigger = $(".model-picker-trigger", picker);
-        const menu = getModelPickerMenu(picker);
-        if (trigger) trigger.setAttribute("aria-expanded", "false");
-        if (menu) {
-            menu.hidden = true;
-            restoreModelPickerMenu(picker, menu);
-        }
-    });
-}
-
-function positionPickerMenu(picker) {
-    const trigger = $(".model-picker-trigger", picker);
-    const menu = getModelPickerMenu(picker);
-    if (!trigger || !menu) return;
-    const rect = trigger.getBoundingClientRect();
-    const maxHeight = Math.min(320, Math.max(180, window.innerHeight - 24));
-    menu.style.position = "fixed";
-    menu.style.left = `${Math.round(rect.left)}px`;
-    menu.style.width = `${Math.round(rect.width)}px`;
-    menu.style.maxHeight = `${maxHeight}px`;
-    const spaceBelow = window.innerHeight - rect.bottom - 12;
-    if (spaceBelow < 220 && rect.top > spaceBelow) {
-        menu.style.top = "auto";
-        menu.style.bottom = `${Math.round(window.innerHeight - rect.top + 6)}px`;
-    } else {
-        menu.style.top = `${Math.round(rect.bottom + 6)}px`;
-        menu.style.bottom = "auto";
+// 输入：无；输出：{ series, freeOnly, search }，存储损坏或不可用时回落默认值。
+function loadModelWallPrefs() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(MODEL_WALL_KEY) || "{}");
+        return { series: saved.series || "all", freeOnly: Boolean(saved.freeOnly), search: "" };
+    } catch {
+        return { series: "all", freeOnly: false, search: "" };
     }
 }
 
-// 输入：模型菜单与当前选项；输出：仅调整菜单自身的纵向滚动位置。
-function scrollSelectedModelIntoMenu(menu, selected) {
-    const menuRect = menu.getBoundingClientRect();
-    const selectedRect = selected.getBoundingClientRect();
-    if (selectedRect.top < menuRect.top) {
-        menu.scrollTop -= menuRect.top - selectedRect.top;
-    } else if (selectedRect.bottom > menuRect.bottom) {
-        menu.scrollTop += selectedRect.bottom - menuRect.bottom;
-    }
+function persistModelWallPrefs() {
+    try {
+        localStorage.setItem(MODEL_WALL_KEY, JSON.stringify({ series: modelWall.series, freeOnly: modelWall.freeOnly }));
+    } catch { /* 存储不可用时仅本次生效 */ }
 }
 
-function setPickerOpen(picker, open) {
-    const trigger = $(".model-picker-trigger", picker);
-    const menu = getModelPickerMenu(picker);
-    if (!trigger || !menu) return;
-    if (open) {
-        closeModelPickers(picker);
-        picker.classList.add("open");
-        trigger.setAttribute("aria-expanded", "true");
-        document.body.appendChild(menu);
-        menu.hidden = false;
-        positionPickerMenu(picker);
-        const selected = $(".model-option.selected", menu);
-        if (selected) scrollSelectedModelIntoMenu(menu, selected);
-    } else {
-        picker.classList.remove("open");
-        trigger.setAttribute("aria-expanded", "false");
-        menu.hidden = true;
-        restoreModelPickerMenu(picker, menu);
-    }
+// 输入：系列分组；输出：重建系列标签栏，记住的系列已不存在时回落「全部」。
+function renderModelTabs(groups) {
+    if (modelWall.series !== "all" && !groups.some((group) => group.title === modelWall.series)) modelWall.series = "all";
+    const tabs = [{ key: "all", text: `全部 ${state.models.length}` }]
+        .concat(groups.map((group) => ({ key: group.title, text: `${group.title} ${group.models.length}` })));
+    $("#modelTabs").replaceChildren(...tabs.map((tab) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.series = tab.key;
+        button.textContent = tab.text;
+        button.classList.toggle("active", tab.key === modelWall.series);
+        return button;
+    }));
 }
 
-function paintPickerTrigger(picker, modelId) {
-    const model = state.models.find((item) => item.id === modelId);
-    const name = $(".model-picker-name", picker);
-    const meta = $(".model-picker-meta", picker);
-    const chip = $(".model-picker-trigger .billing-chip", picker);
-    const free = isFreeModel(model || modelId);
-    const missing = isModelMissing(modelId);
-    picker.classList.toggle("is-missing", missing);
-    if (name) name.textContent = model?.label || modelId || "选择模型";
-    if (meta) {
-        const caps = modelCaps(model);
-        const base = missing ? "该模型已下线或不存在，请重新选择" : (free ? "当前为免费模型" : "当前为高级模型（按余额扣费）");
-        meta.textContent = !missing && caps ? `${base} · ${caps}` : base;
-    }
-    if (chip) {
-        chip.textContent = missing ? "已下线" : (free ? "免费" : paidLabel(model || modelId));
-        chip.dataset.tier = missing ? "gone" : (free ? "free" : "paid");
-    }
+// 输入：模型、当前选中 ID；输出：可点击的模型卡片按钮。
+function createModelCard(model, selected) {
+    const free = isFreeModel(model);
+    const caps = modelCaps(model);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "model-card";
+    card.dataset.id = model.id;
+    card.setAttribute("role", "option");
+    card.setAttribute("aria-selected", String(model.id === selected));
+    card.classList.toggle("selected", model.id === selected);
+    card.innerHTML = `
+        <span class="model-card-head">
+            <strong>${escapeHtml(model.label || model.id)}</strong>
+            <span class="billing-chip" data-tier="${free ? "free" : "paid"}"${free ? "" : ` title="${escapeHtml(paidTitle(model))}"`}>${escapeHtml(free ? "免费" : paidLabel(model))}</span>
+        </span>
+        <small class="model-card-id">${escapeHtml(model.id)}</small>
+        ${caps ? `<small class="model-card-caps">${escapeHtml(caps)}</small>` : ""}
+        <svg class="model-card-check" aria-hidden="true"><use href="#i-check"/></svg>`;
+    return card;
 }
 
-function appendPickerGroup(menu, title, models, selected) {
-    if (!models.length) return;
-    const group = document.createElement("div");
-    group.className = "model-group";
-    const heading = document.createElement("p");
-    heading.className = "model-group-title";
-    heading.textContent = title;
-    group.append(heading);
-    models.forEach((model) => {
-        const option = document.createElement("button");
-        option.type = "button";
-        option.className = "model-option";
-        option.dataset.id = model.id;
-        option.setAttribute("role", "option");
-        option.setAttribute("aria-selected", String(model.id === selected));
-        if (model.id === selected) option.classList.add("selected");
-        const copy = document.createElement("span");
-        copy.className = "model-option-copy";
-        const name = document.createElement("strong");
-        name.textContent = model.label;
-        const id = document.createElement("small");
-        const caps = modelCaps(model);
-        id.textContent = caps ? `${model.id} · ${caps}` : model.id;
-        copy.append(name, id);
-        const mark = document.createElement("span");
-        mark.className = `billing-chip ${isFreeModel(model) ? "free" : "paid"}`;
-        mark.textContent = isFreeModel(model) ? "免费" : paidLabel(model);
-        if (!isFreeModel(model)) mark.title = paidTitle(model);
-        option.append(copy, mark);
-        group.append(option);
-    });
-    menu.append(group);
+// 输入：当前选中模型 ID；输出：按系列/免费/搜索词过滤后重绘标签栏与卡片网格。
+function renderModelWall(selected) {
+    const wall = $("#modelWall");
+    if (!wall) return;
+    const groups = groupedModels();
+    renderModelTabs(groups);
+    $("#modelFreeOnly").checked = modelWall.freeOnly;
+    const keyword = modelWall.search;
+    const models = groups
+        .filter((group) => modelWall.series === "all" || group.title === modelWall.series)
+        .flatMap((group) => group.models)
+        .filter((model) => !modelWall.freeOnly || isFreeModel(model))
+        .filter((model) => !keyword || `${model.id} ${model.label}`.toLowerCase().includes(keyword));
+    wall.replaceChildren(...models.map((model) => createModelCard(model, selected)));
+    $("#modelWallEmpty").hidden = models.length > 0;
 }
 
 function populateModels(selected) {
-    const groups = groupedModels();
-    const ordered = groups.flatMap((group) => group.models);
-    for (const select of [$("#homeModel"), $("#configModel")]) {
-        if (!select) continue;
-        select.replaceChildren();
-        ordered.forEach((model) => {
-            const option = document.createElement("option");
-            option.value = model.id;
-            option.textContent = model.label;
-            select.append(option);
-        });
-        select.value = selected;
-    }
-    $$(".model-picker").forEach((picker) => {
-        const menu = getModelPickerMenu(picker);
-        if (!menu) return;
-        menu.replaceChildren();
-        groups.forEach((group) => appendPickerGroup(menu, group.title, group.models, selected));
-        paintPickerTrigger(picker, selected);
-    });
-    $("#routeTarget").textContent = selected || "—";
+    renderModelWall(selected);
+    $("#routeTarget").textContent = selected ? modelLabel(selected) : "—";
+    $("#configModelName").textContent = selected ? modelLabel(selected) : "—";
     updateRouteBilling(selected);
     renderChips();
     notifyModelMissing(selected);
-}
-
-function applyModelSelection(modelId, persist) {
-    $("#homeModel").value = modelId;
-    $("#configModel").value = modelId;
-    populateModels(modelId);
-    closeModelPickers();
-    if (persist) changeModel(modelId);
 }
 
 function applyConfig(config) {
@@ -1088,6 +1009,10 @@ function renderLicense(license) {
     const meta = $("#licenseMeta");
 
     panel.dataset.state = info.valid ? "valid" : info.activated ? "invalid" : "pending";
+    // 授权有效时卡片收起，信息与充值入口挪到顶栏胶囊的弹出层
+    panel.hidden = Boolean(info.valid);
+    $("#licenseChip").hidden = !info.valid;
+    if (!info.valid) setLicensePopOpen(false);
 
     if (info.valid) {
         setBadge(badge, "已授权", "success");
@@ -1095,6 +1020,7 @@ function renderLicense(license) {
         infoText.textContent = days > 0
             ? `授权有效，剩余约 ${days} 天。`
             : "授权有效。";
+        $("#licenseChipDays").textContent = days > 0 ? `剩 ${days} 天` : "已授权";
         if (form) form.hidden = true;
         if (meta) {
             meta.hidden = false;
@@ -1124,11 +1050,20 @@ function renderBalance(info, authorized) {
     const show = Boolean(authorized && info && info.billing_enabled);
     const label = $("#licenseBalance");
     const redeem = $("#licenseRedeem");
+    const chipBalance = $("#licenseChipBalance");
     if (label) {
         label.hidden = !show;
         if (show) label.textContent = `余额 ${info.balance_text || "—"}`;
     }
+    chipBalance.hidden = !show;
+    if (show) chipBalance.textContent = info.balance_text || "—";
     if (redeem) redeem.hidden = !show;
+}
+
+// setLicensePopOpen 输入：是否展开；控制顶栏授权胶囊的弹出层
+function setLicensePopOpen(open) {
+    $("#licensePop").hidden = !open;
+    $("#licenseChip").setAttribute("aria-expanded", String(open));
 }
 
 async function handleRedeemTopup() {
@@ -1643,7 +1578,11 @@ function renderUsage(data) {
     const freeRequests = Number(summary.free_requests) || 0;
     $("#usageFreeSplit").textContent = `累计免费 ${formatInt(freeRequests)} 次 · 付费 ${formatInt(summary.paid_requests ?? (summary.total_requests || 0) - freeRequests)} 次`;
     $("#usageTotalTokens").textContent = formatTokens(summary.total_tokens);
-    $("#usageTokenSplit").textContent = `输入 ${formatTokens(summary.prompt_tokens)} · 输出 ${formatTokens(summary.completion_tokens)}`;
+    const cacheAll = (Number(summary.cache_read_tokens) || 0) + (Number(summary.cache_write_tokens) || 0);
+    const freshInput = Number.isFinite(summary.input_tokens)
+        ? summary.input_tokens
+        : Math.max(0, (Number(summary.prompt_tokens) || 0) - cacheAll);
+    $("#usageTokenSplit").textContent = `输入 ${formatTokens(freshInput)} · 缓存 ${formatTokens(cacheAll)} · 输出 ${formatTokens(summary.completion_tokens)}`;
     const rate = Math.min(1, Math.max(0, Number(summary.cache_hit_rate) || 0));
     $("#usageCacheRate").textContent = `${(rate * 100).toFixed(2)}%`;
     $("#usageCacheBar").style.width = `${(rate * 100).toFixed(2)}%`;
@@ -1834,11 +1773,17 @@ function renderUsageRecords(records) {
             const label = item.label || item.model || "—";
             const id = item.model && item.model !== label ? `<small>${escapeHtml(item.model)}</small>` : "";
             const estimated = item.estimated ? `<span class="usage-est" title="上游未返回准确用量，此条费用为估算值">估算</span>` : "";
+            const cacheRead = Number(item.cache_read_tokens) || 0;
+            const cacheWrite = Number(item.cache_write_tokens) || 0;
+            const input = Number.isFinite(item.input_tokens)
+                ? item.input_tokens
+                : Math.max(0, (Number(item.prompt_tokens) || 0) - cacheRead - cacheWrite);
+            const cache = cacheRead || cacheWrite ? `${formatInt(cacheRead)} / ${formatInt(cacheWrite)}` : "—";
             return `<tr>
                 <td class="time">${escapeHtml(formatRecordTime(item.time))}</td>
                 <td class="model"><strong>${escapeHtml(label)}</strong>${id}</td>
-                <td class="num">${formatInt(item.prompt_tokens)}</td>
-                <td class="num">${formatInt(item.cache_read_tokens)}</td>
+                <td class="num" title="含缓存总输入 ${formatInt(item.prompt_tokens)}">${formatInt(input)}</td>
+                <td class="num">${cache}</td>
                 <td class="num">${formatInt(item.completion_tokens)}</td>
                 <td class="num cost">${estimated}${item.free ? `<span class="usage-free">免费</span>` : escapeHtml(formatRecordCost(item.cost))}</td>
             </tr>`;
@@ -1912,8 +1857,7 @@ function splitLines(value) {
 }
 
 async function changeModel(modelId) {
-    $("#homeModel").value = modelId;
-    $("#configModel").value = modelId;
+    if (!modelId || modelId === state.config.override_model) return;
     populateModels(modelId);
     state.config.override_model = modelId;
     try {
@@ -1953,7 +1897,7 @@ async function handleSaveConfig(event) {
         stub_paths: $("#stubPaths") ? splitLines($("#stubPaths").value) : undefined,
         target_domains: splitLines($("#targetDomains").value),
         target_paths: splitLines($("#targetPaths").value),
-        override_model: $("#configModel").value || state.config?.override_model || "",
+        override_model: state.config?.override_model || "",
         show_mitmweb: false,
         restart_devin_on_start: $("#restartToggle").checked,
     };
@@ -2199,11 +2143,19 @@ function bindEvents() {
     if ($("#userMenuBtn")) {
         $("#userMenuBtn").addEventListener("click", (event) => {
             event.stopPropagation();
+            setLicensePopOpen(false);
             setUserMenuOpen($("#userMenu").hidden);
         });
         $("#userMenu").addEventListener("click", (event) => event.stopPropagation());
         document.addEventListener("click", () => setUserMenuOpen(false));
     }
+    $("#licenseChip").addEventListener("click", (event) => {
+        event.stopPropagation();
+        setUserMenuOpen(false);
+        setLicensePopOpen($("#licensePop").hidden);
+    });
+    $("#licensePop").addEventListener("click", (event) => event.stopPropagation());
+    document.addEventListener("click", () => setLicensePopOpen(false));
     if ($("#announcementClose")) $("#announcementClose").addEventListener("click", () => {
         state.announcementClosed = announcementKey(state.announcement);
         persistDismissedAnnouncement(state.announcementClosed);
@@ -2252,24 +2204,29 @@ function bindEvents() {
         await pollStatus(true);
         setButtonBusy(button, false);
     });
-    $$(".model-picker").forEach((picker) => {
-        const trigger = $(".model-picker-trigger", picker);
-        const menu = $(".model-picker-menu", picker);
-        picker._modelPickerMenu = menu;
-        trigger.addEventListener("click", (event) => {
-            event.stopPropagation();
-            setPickerOpen(picker, !picker.classList.contains("open"));
-        });
-        menu.addEventListener("click", (event) => {
-            event.stopPropagation();
-            const option = event.target.closest(".model-option");
-            if (!option) return;
-            applyModelSelection(option.dataset.id, picker.dataset.persist === "true");
-        });
+    $("#modelWall").addEventListener("click", (event) => {
+        const card = event.target.closest(".model-card");
+        if (card) changeModel(card.dataset.id);
     });
-    document.addEventListener("click", () => closeModelPickers());
-    window.addEventListener("resize", () => {
-        $$(".model-picker.open").forEach(positionPickerMenu);
+    $("#modelTabs").addEventListener("click", (event) => {
+        const tab = event.target.closest("[data-series]");
+        if (!tab) return;
+        modelWall.series = tab.dataset.series;
+        persistModelWallPrefs();
+        renderModelWall(state.config.override_model);
+    });
+    $("#modelFreeOnly").addEventListener("change", (event) => {
+        modelWall.freeOnly = event.target.checked;
+        persistModelWallPrefs();
+        renderModelWall(state.config.override_model);
+    });
+    $("#modelSearch").addEventListener("input", (event) => {
+        modelWall.search = event.target.value.trim().toLowerCase();
+        renderModelWall(state.config.override_model);
+    });
+    $("#gotoModelWallBtn").addEventListener("click", () => {
+        navigate("home");
+        $(".route-panel").scrollIntoView({ block: "start", behavior: "smooth" });
     });
     $("#restartToggle").addEventListener("change", (event) => changeOption("restart_devin_on_start", event.target.checked));
     $("#configForm").addEventListener("submit", handleSaveConfig);
@@ -2333,7 +2290,6 @@ function bindEvents() {
                 $("#modalCancel").click();
                 return;
             }
-            closeModelPickers();
             setUserMenuOpen(false);
         }
         if (event.ctrlKey && event.key.toLocaleLowerCase() === "k") {
@@ -2472,7 +2428,7 @@ function setupWindowChrome() {
     const topbar = $(".topbar");
     const winCall = (action) => window.bailanWin(action).catch(() => false);
     const syncMax = () => winCall("state").then((max) => root.classList.toggle("is-maximized", !!max));
-    const isDragArea = (target) => !target.closest("button, a, input, .user-menu, .win-resize-top");
+    const isDragArea = (target) => !target.closest("button, a, input, .user-menu, .license-pop, .win-resize-top");
 
     root.classList.add("framed-app");
     $("#winControls").hidden = false;
