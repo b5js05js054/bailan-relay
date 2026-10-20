@@ -17,7 +17,7 @@ const UIVersion = "3.0"
 
 // AppVersion 客户端程序版本号，用于远程更新检查。
 // 可通过链接期注入：-ldflags "-X bailan-relay/internal/config.AppVersion=1.0.1"
-var AppVersion = "1.2.7"
+var AppVersion = "1.2.9"
 
 // Edition 区分构建版本：
 //   - "full"     完整版（默认，开发/自用，展示全部信息）
@@ -68,6 +68,46 @@ type Model struct {
 	ContextWindow    int  `json:"context_window,omitempty"`
 	MaxOutput        int  `json:"max_output,omitempty"`
 	SupportsThinking bool `json:"supports_thinking,omitempty"`
+	// 用户可在客户端选择的思考强度 / 上下文档位（token）；空 = 不提供该选项。
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	ContextOptions   []int    `json:"context_options,omitempty"`
+}
+
+// ModelOption 用户为某个模型保存的选择；零值 = 使用渠道默认 / 模型上限。
+type ModelOption struct {
+	Effort  string `json:"effort,omitempty"`
+	Context int    `json:"context,omitempty"`
+}
+
+// ModelByID 按 ID 查当前目录里的模型。
+func ModelByID(modelID string) (Model, bool) {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	for _, m := range Models() {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return Model{}, false
+}
+
+// ValidModelOption 按目录下发的可选项过滤用户选择：不在可选范围内的项丢弃（后台调整选项后旧选择自动失效）。
+func ValidModelOption(modelID string, opt ModelOption) ModelOption {
+	m, ok := ModelByID(modelID)
+	if !ok {
+		return ModelOption{}
+	}
+	var out ModelOption
+	for _, e := range m.ReasoningEfforts {
+		if e == opt.Effort {
+			out.Effort = e
+		}
+	}
+	for _, c := range m.ContextOptions {
+		if c == opt.Context {
+			out.Context = c
+		}
+	}
+	return out
 }
 
 // SelectableModels 是内置兜底模型列表（授权后台不可达时使用）。
@@ -232,6 +272,8 @@ type Config struct {
 	MitmwebToken        string   `json:"mitmweb_token,omitempty"`
 	// LicenseAPIURL 卡密授权管理系统地址（激活/心跳）。
 	LicenseAPIURL string `json:"license_api_url"`
+	// ModelOptions 每个模型的思考强度 / 上下文选择（key = 模型 ID）。
+	ModelOptions map[string]ModelOption `json:"model_options,omitempty"`
 }
 
 // Default 返回一份默认配置（首次运行时写入磁盘）。

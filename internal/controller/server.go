@@ -32,6 +32,7 @@ func (c *Controller) routes() map[string]func([]any) any {
 		"clear_log_buffer":        c.apiClearLogBuffer,
 		"load_log_history":        c.apiLoadLogHistory,
 		"set_model":               c.apiSetModel,
+		"set_model_option":        c.apiSetModelOption,
 		"set_option":              c.apiSetOption,
 		"save_config":             c.apiSaveConfig,
 		"scan_processes":          c.apiScanProcesses,

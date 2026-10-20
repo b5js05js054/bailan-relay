@@ -241,16 +241,6 @@
             </div>
 
             <section class="page active" id="page-home" data-page="home">
-                <header class="page-header">
-                    <div>
-                        <h1>中继控制台</h1>
-                        <p class="page-description">管理应用级拦截、模型路由和中继服务状态。</p>
-                    </div>
-                    <button class="button secondary" id="refreshStatusBtn" type="button">
-                        <svg><use href="#i-refresh"/></svg><span>刷新状态</span>
-                    </button>
-                </header>
-
                 <div class="page-scroll">
                     <article class="panel license-panel" id="licensePanel">
                         <div class="panel-header">
@@ -265,20 +255,25 @@
                         </div>
                     </article>
                     <article class="status-board" id="statusBoard" data-state="checking">
-                        <div class="status-main">
-                            <div class="status-meta">
-                                <span class="card-eyebrow"><svg><use href="#i-route"/></svg>拦截控制</span>
-                                <time id="updatedAt">正在检测</time>
-                            </div>
-                            <div class="status-heading">
-                                <span class="status-led"></span>
+                        <header class="deck-head">
+                            <div class="deck-title">
+                                <span class="deck-icon" aria-hidden="true"><svg><use href="#i-route"/></svg></span>
                                 <h2 id="captureTitle">正在读取运行状态</h2>
-                                <span class="badge neutral" id="captureBadge">检测中</span>
+                                <span class="status-led" aria-hidden="true"></span>
+                                <div class="chip-row" id="chipRow" aria-label="当前配置"></div>
                             </div>
-                            <p class="status-summary" id="statusSummary">正在连接本地服务并检查中继地址。</p>
-                            <div class="chip-row" id="chipRow" aria-label="当前配置"></div>
+                            <div class="deck-tools">
+                                <span class="badge neutral" id="captureBadge">检测中</span>
+                                <time id="updatedAt">正在检测</time>
+                                <button class="icon-button" id="refreshStatusBtn" type="button" title="刷新状态" aria-label="刷新状态">
+                                    <svg><use href="#i-refresh"/></svg>
+                                </button>
+                            </div>
+                        </header>
 
-                            <div class="proxy-control">
+                        <div class="deck-body">
+                            <div class="deck-main">
+                                <p class="status-summary" id="statusSummary">正在连接本地服务并检查中继地址。</p>
                                 <div class="control-buttons">
                                     <button class="button control-primary" id="startProxyBtn" type="button">
                                         <svg><use href="#i-play"/></svg><span>启动拦截</span>
@@ -287,36 +282,37 @@
                                         <svg><use href="#i-stop"/></svg><span>停止拦截并关闭 Devin</span>
                                     </button>
                                 </div>
+                                <label class="start-option" for="restartToggle" title="代理就绪后重启 Devin，确保新连接进入拦截">
+                                    <span class="switch"><input id="restartToggle" type="checkbox"><span></span></span>
+                                    <span class="start-option-copy">启动后重启 Devin</span>
+                                </label>
                                 <div class="operation-feedback">
                                     <div class="operation-copy"><span id="operationMessage">等待启动</span><strong id="operationPercent">0%</strong></div>
                                     <div class="progress-track"><span id="operationProgress"></span></div>
                                 </div>
                             </div>
-                        </div>
 
-                        <aside class="status-side">
-                            <div class="side-title">
-                                <span>运行状态</span>
-                                <span class="control-state" id="controlState">待机</span>
-                            </div>
-                            <div class="health-grid">
-                                <div class="health-item">
-                                    <div class="health-label"><svg><use href="#i-route"/></svg><span>应用级捕获</span></div>
-                                    <span class="badge neutral" id="proxyBadge">检测中</span>
-                                </div>
-                                <div class="health-item">
-                                    <div class="health-label"><svg><use href="#i-server"/></svg><span>中继服务</span></div>
-                                    <div class="health-actions">
-                                        <button class="inline-action" id="testRelayBtn" type="button">测试连接</button>
-                                        <span class="badge neutral" id="relayBadge">检测中</span>
+                            <aside class="status-side" aria-label="运行状态">
+                                <span class="control-state visually-hidden" id="controlState">待机</span>
+                                <div class="health-grid">
+                                    <div class="health-item">
+                                        <div class="health-label"><span>应用级捕获</span></div>
+                                        <span class="badge neutral" id="proxyBadge">检测中</span>
+                                    </div>
+                                    <div class="health-item">
+                                        <div class="health-label"><span>中继服务</span></div>
+                                        <div class="health-actions">
+                                            <button class="inline-action" id="testRelayBtn" type="button">测试</button>
+                                            <span class="badge neutral" id="relayBadge">检测中</span>
+                                        </div>
+                                    </div>
+                                    <div class="health-item">
+                                        <div class="health-label"><span>网络延迟</span></div>
+                                        <span class="badge neutral hb-badge" id="hbBadge">检测中</span>
                                     </div>
                                 </div>
-                                <div class="health-item">
-                                    <div class="health-label"><svg><use href="#i-pulse"/></svg><span>网络延迟</span></div>
-                                    <span class="badge neutral hb-badge" id="hbBadge">检测中</span>
-                                </div>
-                            </div>
-                        </aside>
+                            </aside>
+                        </div>
                     </article>
 
                     <article class="panel heartbeat-panel" id="heartbeatPanel" data-state="idle">
@@ -367,6 +363,16 @@
                                 <span class="billing-chip" id="routeBilling" data-tier="paid">收费模型</span>
                             </div>
                         </div>
+                        <div class="model-options" id="modelOptions" hidden>
+                            <label class="model-option" for="modelEffort" id="modelEffortField">
+                                <span>思考强度</span>
+                                <select id="modelEffort"></select>
+                            </label>
+                            <label class="model-option" for="modelContext" id="modelContextField">
+                                <span>上下文大小</span>
+                                <select id="modelContext"></select>
+                            </label>
+                        </div>
                         <div class="model-toolbar">
                             <div class="segment-control model-tabs" id="modelTabs" aria-label="模型系列"></div>
                             <label class="model-free-toggle" for="modelFreeOnly">
@@ -380,17 +386,6 @@
                         <div class="model-wall" id="modelWall" role="listbox" aria-label="上游模型"></div>
                         <p class="preview-empty" id="modelWallEmpty" hidden>没有符合条件的模型。</p>
                         <small class="model-wall-hint" id="modelWallHint">仅替换 Devin 发出的 SWE-1.6 系列请求。可选模型由后台下发。</small>
-                    </article>
-
-                    <article class="panel option-panel">
-                        <div class="panel-header">
-                            <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-refresh"/></svg>启动选项</h3></div>
-                        </div>
-                        <label class="setting-row" for="restartToggle">
-                            <span class="setting-icon"><svg><use href="#i-refresh"/></svg></span>
-                            <span class="setting-copy"><strong>重启 Devin</strong><small>代理就绪后重启应用，确保新连接进入拦截。</small></span>
-                            <span class="switch"><input id="restartToggle" type="checkbox"><span></span></span>
-                        </label>
                     </article>
 
                     <article class="panel activity-panel">
@@ -413,7 +408,7 @@
                             <button class="inline-action" id="openLogsBtn" type="button">查看全部</button>
                         </div>
                         <div class="preview-lines" id="logPreview" aria-live="off"></div>
-                        <p class="preview-empty" id="logPreviewEmpty">暂无运行记录，启动代理后会在这里显示最近事件。</p>
+                        <p class="preview-empty" id="logPreviewEmpty"><svg aria-hidden="true"><use href="#i-terminal"/></svg>暂无日志，启动拦截后会在这里显示最近事件</p>
                     </article>
                 </div>
             </section>

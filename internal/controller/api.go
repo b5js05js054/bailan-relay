@@ -143,6 +143,27 @@ func (c *Controller) apiSetModel(args []any) any {
 	return map[string]any{"ok": true, "message": "模型路由已切换为 " + display, "config": c.publicConfig(cfg)}
 }
 
+func (c *Controller) apiSetModelOption(args []any) any {
+	model := config.NormalizeModelID(argString(args, 0))
+	opt := config.ValidModelOption(model, config.ModelOption{
+		Effort:  strings.TrimSpace(argString(args, 1)),
+		Context: argInt(args, 2, 0),
+	})
+	cfg := config.Save(func(x *config.Config) {
+		if x.ModelOptions == nil {
+			x.ModelOptions = map[string]config.ModelOption{}
+		}
+		if opt == (config.ModelOption{}) {
+			delete(x.ModelOptions, model)
+		} else {
+			x.ModelOptions[model] = opt
+		}
+	})
+	c.proxy.SetModelOption(model, opt)
+	c.log.Log(fmt.Sprintf("[Manager] 模型选项 %s: 思考强度=%q 上下文=%d", model, opt.Effort, opt.Context))
+	return map[string]any{"ok": true, "message": "已保存模型选项", "config": c.publicConfig(cfg)}
+}
+
 func (c *Controller) apiSetOption(args []any) any {
 	name := argString(args, 0)
 	if name == "show_mitmweb" {

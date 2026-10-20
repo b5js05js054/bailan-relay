@@ -166,6 +166,10 @@ const mockApi = {
         mockState.config.override_model = modelId;
         return { ok: true, message: `模型路由已切换为 ${modelId}`, config: structuredClone(mockState.config) };
     },
+    async set_model_option(modelId, effort, context) {
+        mockState.config.model_options = { ...mockState.config.model_options, [modelId]: { effort, context } };
+        return { ok: true, message: "已保存模型选项", config: structuredClone(mockState.config) };
+    },
     async set_option(name, value) {
         mockState.config[name] = Boolean(value);
         return { ok: true, config: structuredClone(mockState.config) };
@@ -678,6 +682,9 @@ function modelCaps(model) {
     return caps.join(" · ");
 }
 
+// 思考强度的展示名。
+const EFFORT_LABELS = { none: "关闭", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "超高", max: "最大" };
+
 // 模型系列分类规则：按 ID/展示名前缀归组，数组顺序即菜单分组顺序，未命中统一归「其他」。
 const MODEL_SERIES = [
     { title: "Claude 系列", prefixes: ["claude", "anthropic"] },
@@ -818,8 +825,48 @@ function renderModelWall(selected) {
     $("#modelWallEmpty").hidden = models.length > 0;
 }
 
+// 输入：当前选中模型 ID；输出：按后台开放的档位重建思考强度 / 上下文下拉，两者都没有开放时整行隐藏。
+function renderModelOptions(selected) {
+    const box = $("#modelOptions");
+    if (!box) return;
+    const model = state.models.find((item) => item.id === selected);
+    const efforts = model?.reasoning_efforts || [];
+    const contexts = model?.context_options || [];
+    const saved = state.config?.model_options?.[selected] || {};
+    const fill = (select, items, current, label, defaultText) => {
+        select.replaceChildren(...[["", defaultText]].concat(items.map((item) => [String(item), label(item)])).map(([value, text]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = text;
+            return option;
+        }));
+        select.value = items.map(String).includes(String(current)) ? String(current) : "";
+    };
+    fill($("#modelEffort"), efforts, saved.effort, (item) => EFFORT_LABELS[item] || item, "默认");
+    fill($("#modelContext"), contexts, saved.context, (item) => `${formatTokenSpec(item)} 上下文`,
+        model?.context_window > 0 ? `默认（${formatTokenSpec(model.context_window)}）` : "默认");
+    $("#modelEffortField").hidden = efforts.length === 0;
+    $("#modelContextField").hidden = contexts.length === 0;
+    box.hidden = efforts.length === 0 && contexts.length === 0;
+}
+
+async function changeModelOption() {
+    const model = state.config.override_model;
+    if (!model) return;
+    try {
+        const result = await callApi("set_model_option", model, $("#modelEffort").value, Number($("#modelContext").value) || 0);
+        if (!result?.ok) throw new Error(result?.message || "保存失败");
+        if (result.config) state.config = { ...state.config, ...result.config };
+        toast("模型选项已保存，下一条消息起生效");
+    } catch (error) {
+        toast(`模型选项保存失败：${errorMessage(error)}`, "error");
+        renderModelOptions(model);
+    }
+}
+
 function populateModels(selected) {
     renderModelWall(selected);
+    renderModelOptions(selected);
     $("#routeTarget").textContent = selected ? modelLabel(selected) : "—";
     $("#configModelName").textContent = selected ? modelLabel(selected) : "—";
     updateRouteBilling(selected);
@@ -2208,6 +2255,8 @@ function bindEvents() {
         const card = event.target.closest(".model-card");
         if (card) changeModel(card.dataset.id);
     });
+    $("#modelEffort").addEventListener("change", changeModelOption);
+    $("#modelContext").addEventListener("change", changeModelOption);
     $("#modelTabs").addEventListener("click", (event) => {
         const tab = event.target.closest("[data-series]");
         if (!tab) return;

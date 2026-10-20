@@ -370,6 +370,7 @@ func (c *Controller) publicConfig(cfg config.Config) map[string]any {
 		"target_domains":         cfg.HijackDomains(),
 		"target_paths":           strSlice(cfg.TargetPaths),
 		"override_model":         config.NormalizeModelID(cfg.OverrideModel),
+		"model_options":          cfg.ModelOptions,
 		"show_mitmweb":           false,
 		"restart_devin_on_start": cfg.RestartDevinOnStart,
 		"license_api_url":        cfg.LicenseAPIURL,

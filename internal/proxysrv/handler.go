@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -314,10 +315,10 @@ func (s *Server) forwardRelay(w http.ResponseWriter, r *http.Request, host strin
 	model := s.currentModel()
 	effectiveModel := model
 	overrideHeader := ""
-
+	var modelOpt config.ModelOption
 	if strings.Contains(r.URL.Path, "GetChatMessage") && model != "" {
 		overrideHeader = model
-		// 用户本地保存的模型已被后台隐藏/删除时，不再向中继发请求，直接告知用户。
+		modelOpt = s.currentModelOption(model)		// 用户本地保存的模型已被后台隐藏/删除时，不再向中继发请求，直接告知用户。
 		if !config.ModelInCatalog(model) {
 			s.rejectModelGone(w, r, model)
 			return
@@ -337,6 +338,12 @@ func (s *Server) forwardRelay(w http.ResponseWriter, r *http.Request, host strin
 		req.Header.Set("X-Original-Path", r.URL.RequestURI())
 		if overrideHeader != "" {
 			req.Header.Set("X-Override-Model", overrideHeader)
+		}
+		if modelOpt.Effort != "" {
+			req.Header.Set("X-Relay-Effort", modelOpt.Effort)
+		}
+		if modelOpt.Context > 0 {
+			req.Header.Set("X-Relay-Context", strconv.Itoa(modelOpt.Context))
 		}
 		req.Header.Del("Expect")
 		req.Header.Set("Accept-Encoding", "identity")

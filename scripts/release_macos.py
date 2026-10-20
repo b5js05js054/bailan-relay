@@ -3,7 +3,7 @@
 
 用法（在仓库任意目录执行）：
     python scripts/release_macos.py                      # 提交改动并推送，沿用源码版本号
-    python scripts/release_macos.py --version 1.2.4      # 同时打 tag v1.2.4，出包版本号为 1.2.4
+    python scripts/release_macos.py --version 1.2.9      # 同时打 tag v1.2.4，出包版本号为 1.2.4
     python scripts/release_macos.py -m "修复 xxx"         # 自定义提交说明
     python scripts/release_macos.py --no-wait            # 只推送，不等待/不下载
 

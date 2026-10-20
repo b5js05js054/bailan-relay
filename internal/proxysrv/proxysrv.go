@@ -55,7 +55,7 @@ type Server struct {
 	relayBase  string
 	relayToken string
 	model      string
-
+	modelOpts  map[string]config.ModelOption
 	relayClient  *http.Client
 	originClient *http.Client
 
@@ -157,7 +157,38 @@ func (s *Server) UpdateConfig(cfg config.Config) {
 	s.relayBase = base
 	s.relayToken = cfg.RelayAuthToken
 	s.model = config.NormalizeModelID(cfg.OverrideModel)
+	s.modelOpts = cloneModelOptions(cfg.ModelOptions)
 	s.mu.Unlock()
+}
+
+// SetModelOption 更新某个模型的思考强度 / 上下文选择（set_model_option 用）。
+func (s *Server) SetModelOption(model string, opt config.ModelOption) {
+	s.mu.Lock()
+	if s.modelOpts == nil {
+		s.modelOpts = map[string]config.ModelOption{}
+	}
+	if opt == (config.ModelOption{}) {
+		delete(s.modelOpts, model)
+	} else {
+		s.modelOpts[model] = opt
+	}
+	s.mu.Unlock()
+}
+
+// currentModelOption 返回模型当前生效的选择，已不在后台可选范围内的项自动丢弃。
+func (s *Server) currentModelOption(model string) config.ModelOption {
+	s.mu.RLock()
+	opt := s.modelOpts[model]
+	s.mu.RUnlock()
+	return config.ValidModelOption(model, opt)
+}
+
+func cloneModelOptions(src map[string]config.ModelOption) map[string]config.ModelOption {
+	out := make(map[string]config.ModelOption, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
 }
 
 // SetModel 仅更新替换模型（set_model 用）。
