@@ -267,15 +267,17 @@ func (m *Manager) EnsureFresh() (bool, string) {
 	return true, "ok"
 }
 
-// Valid 返回当前授权是否有效（已激活且卡密未过期）。
+// Valid 返回当前授权是否有效（必须有卡密且激活过）。
 func (m *Manager) Valid() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if !m.state.Activated {
+	// 必须有卡密且激活过
+	if m.state.CardKey == "" || !m.state.Activated {
 		return false
 	}
+	// 激活过期且有余额时仍可用（纯余额卡密）
 	if m.state.CardExp != nil && m.state.CardExp.Before(time.Now()) {
-		return false
+		return m.state.Balance > 0
 	}
 	return true
 }
@@ -337,7 +339,9 @@ func (m *Manager) Deactivate() {
 func (m *Manager) Status() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	valid := m.state.Activated && (m.state.CardExp == nil || m.state.CardExp.After(time.Now()))
+	// 必须激活过才显示已激活,前端根据 valid 判断是否真的有效
+	activated := m.state.Activated
+	valid := activated && (m.state.CardExp == nil || m.state.CardExp.After(time.Now()) || m.state.Balance > 0)
 	masked := maskCode(m.state.CardKey)
 	var cardExp string
 	if m.state.CardExp != nil {
@@ -351,7 +355,7 @@ func (m *Manager) Status() map[string]any {
 		}
 	}
 	return map[string]any{
-		"activated":     m.state.Activated,
+		"activated":     activated,
 		"valid":         valid,
 		"card_key":      masked,
 		"device_id":     m.state.DeviceID,
@@ -385,6 +389,17 @@ func (m *Manager) bearer() (apiURL, token string, ok bool) {
 	return m.apiURL, m.state.Token, true
 }
 
+// userBearer 返回用户账号令牌与接口地址;登录后总是 ok=true。
+func (m *Manager) userBearer() (apiURL, token string, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	token = m.accountToken()
+	if token == "" || m.apiURL == "" {
+		return "", "", false
+	}
+	return m.apiURL, token, true
+}
+
 // RefreshBalance 向后台拉取最新余额（高级模型扣费后保持界面读数接近实时）。静默失败。
 func (m *Manager) RefreshBalance() {
 	apiURL, token, ok := m.bearer()
@@ -402,22 +417,31 @@ func (m *Manager) RefreshBalance() {
 }
 
 // Redeem 用充值卡密给当前授权的卡密充值。返回 (是否成功, 提示)。
+// 不再依赖激活状态:使用用户账号 token,可选指定卡密 code,不填则自动选最近激活的卡密。
 func (m *Manager) Redeem(topupCode string) (bool, string) {
 	topupCode = strings.ToUpper(strings.TrimSpace(topupCode))
 	if topupCode == "" {
 		return false, "请输入充值码"
 	}
-	// 令牌过期时先续期，避免充值码被用掉前才发现授权失效。
-	m.refreshIfNearExpiry()
-	apiURL, token, ok := m.bearer()
-	if !ok {
-		return false, "请先激活卡密再充值"
+	// 用用户账号 token 而不是卡密 token,这样未激活也能充值
+	apiURL, userToken, userOK := m.userBearer()
+	if !userOK {
+		return false, "请先登录账号"
 	}
+	// 用当前激活的卡密 code(如果有的话)
+	m.mu.RLock()
+	cardKey := m.state.CardKey
+	m.mu.RUnlock()
 	var out struct {
 		tokenResponse
-		Detail string `json:"detail"`
+		Detail  string `json:"detail"`
+		CardKey string `json:"card_key"`
 	}
-	err := m.doJSON(http.MethodPost, apiURL+"/api/license/redeem", token, map[string]string{"topup_code": topupCode}, &out)
+	body := map[string]string{"topup_code": topupCode}
+	if cardKey != "" {
+		body["card_key"] = cardKey
+	}
+	err := m.doJSON(http.MethodPost, apiURL+"/api/license/user-redeem", userToken, body, &out)
 	if err != nil {
 		return false, "充值失败：" + err.Error()
 	}
@@ -427,8 +451,14 @@ func (m *Manager) Redeem(topupCode string) (bool, string) {
 	if out.OK {
 		m.mu.Lock()
 		m.applyBalanceLocked(out.Balance, out.BillingEnabled, out.Currency)
+		activated := m.state.Activated
 		m.persistLocked()
 		m.mu.Unlock()
+		if !activated && out.CardKey != "" {
+			if aok, amsg := m.Activate(out.CardKey); !aok {
+				return true, "充值成功，但自动开通授权失败：" + amsg
+			}
+		}
 	}
 	msg := out.Message
 	if msg == "" {

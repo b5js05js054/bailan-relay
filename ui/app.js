@@ -1151,20 +1151,37 @@ async function handleActivateLicense() {
     }
     setButtonBusy(button, true);
     try {
-        const res = await callApi("activate_license", code);
-        if (res && res.ok) {
-            showNotice(res.message || "激活成功", "success");
-            if (input) input.value = "";
-            renderLicense(res.license);
-            state.status.license = res.license;
-            renderStatus(state.status);
-            pollStatus(false);
+        // 自动识别充值卡密（TP-开头）
+        if (code.toUpperCase().startsWith("TP-")) {
+            const res = await callApi("redeem_topup", code);
+            if (res && res.ok) {
+                showNotice(res.message || "充值成功", "success");
+                if (input) input.value = "";
+                renderLicense(res.license);
+                state.status.license = res.license;
+                renderStatus(state.status);
+                pollStatus(false);
+            } else {
+                showNotice((res && res.message) || "充值失败", "error");
+                if (res) renderLicense(res.license);
+            }
         } else {
-            showNotice((res && res.message) || "激活失败", "error");
-            if (res) renderLicense(res.license);
+            // 普通卡密激活
+            const res = await callApi("activate_license", code);
+            if (res && res.ok) {
+                showNotice(res.message || "激活成功", "success");
+                if (input) input.value = "";
+                renderLicense(res.license);
+                state.status.license = res.license;
+                renderStatus(state.status);
+                pollStatus(false);
+            } else {
+                showNotice((res && res.message) || "激活失败", "error");
+                if (res) renderLicense(res.license);
+            }
         }
     } catch (error) {
-        showNotice(`激活失败：${errorMessage(error)}`, "error");
+        showNotice(`操作失败：${errorMessage(error)}`, "error");
     } finally {
         setButtonBusy(button, false);
     }
@@ -1521,8 +1538,8 @@ function formatMoney(value, digits = 4) {
 }
 
 function formatRecordCost(value) {
-    const n = Number(value) || 0;
-    return formatMoney(n, n !== 0 && Math.abs(n) < 0.01 ? 6 : 4);
+    // 单条扣费保留 6 位，与后台额度换算精度一致，避免小额费用被截成 4 位。
+    return formatMoney(value, 6);
 }
 
 function formatTokens(value) {
