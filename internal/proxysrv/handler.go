@@ -2,6 +2,7 @@ package proxysrv
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -16,6 +17,7 @@ import (
 
 	"bailan-relay/internal/config"
 	"bailan-relay/internal/connectframe"
+	"bailan-relay/internal/devincatalog"
 	"bailan-relay/internal/tunbypass"
 )
 
@@ -129,6 +131,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	matchText := host + r.URL.RequestURI()
 
 	if isTarget {
+		if host == "app.devin.ai" || host == "api.devin.ai" {
+			if strings.Contains(r.URL.Path, "billing") || strings.Contains(r.URL.Path, "quota") || strings.Contains(r.URL.Path, "credit") {
+				s.logLine("[账单流量] %s %s%s", r.Method, host, r.URL.RequestURI())
+			}
+		}
+		if strings.Contains(r.URL.Path, "/billing/status") {
+			s.patchBillingStatus(w, r, host, body)
+			return
+		}
 		// 客户版的 Devin ACP 认证只有 10 秒总预算。GetCliTeamSettings 在冷启动时
 		// 偶尔能收到响应头，却无法在 10 秒内读完整个响应体，最终导致整个 ACP
 		// authenticate 失败。这里先限时读取官方结果；官方链路足够快时原样返回，
@@ -138,6 +149,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if isPolicyPassthrough(matchText) {
+			if devincatalog.IsCatalog(r.URL.Path) {
+				s.passthroughCatalog(w, r, host, body)
+				return
+			}
 			s.passthrough(w, r, host, body)
 			return
 		}
@@ -156,11 +171,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.isRelayTarget(host, r.URL.Path, isTarget, paths) {
+		if isTarget && devincatalog.IsCatalog(r.URL.Path) {
+			s.passthroughCatalog(w, r, host, body)
+			return
+		}
 		s.passthrough(w, r, host, body)
 		return
 	}
 
 	ct := r.Header.Get("content-type")
+	// 模型目录即使被标成中继目标，也要先改写再交给 Devin。
+	// 登录时的 GetUserStatus 常常不是 proto 内容类型，原先会整包流式回传官方列表，
+	// Devin 的模型选择器因此对不上后台这批模型。
+	if devincatalog.IsCatalog(r.URL.Path) {
+		s.passthroughCatalog(w, r, host, body)
+		return
+	}
 	if !strings.Contains(strings.ToLower(ct), "proto") {
 		s.passthrough(w, r, host, body)
 		return
@@ -196,7 +222,21 @@ func (s *Server) customerTeamSettings(w http.ResponseWriter, r *http.Request, ho
 			defer resp.Body.Close()
 			payload, readErr := io.ReadAll(io.LimitReader(resp.Body, maxCustomerTeamSettingsBytes+1))
 			if readErr == nil && len(payload) <= maxCustomerTeamSettingsBytes {
+				plain := payload
+				gzipped := strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip")
+				if gzipped {
+					if decoded, derr := gunzipPayload(plain); derr == nil {
+						plain = decoded
+					}
+				}
+				out, added, augErr := devincatalog.Augment(plain, resp.Header.Get("Content-Type"), r.URL.Path, config.Models())
 				copyResponseHeaders(w.Header(), resp.Header)
+				if augErr == nil && added > 0 && out != nil {
+					w.Header().Del("Content-Encoding")
+					w.Header().Del("Content-Length")
+					w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+					payload = out
+				}
 				w.WriteHeader(resp.StatusCode)
 				_, _ = w.Write(payload)
 				if s.log != nil {
@@ -279,7 +319,128 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, host string
 	}
 }
 
+// 登录时 Devin 拉到的用户状态经常超过 8MB。超过上限就原样回传，模型目录写不进去，
+// 选择器里就只剩官方模型。
+const maxCatalogBytes = 48 << 20
+
+// passthroughCatalog 回源读取模型目录，把当前可选模型写进响应后再交给 Devin。
+// 写入失败或响应过大时原样返回官方内容，避免目录接口失败。
+func (s *Server) passthroughCatalog(w http.ResponseWriter, r *http.Request, host string, body []byte) {
+	ip := s.resolver.ResolveRealIP(host)
+	if !config.IsPublicIPv4(ip) {
+		w.Header().Set("content-type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(fmt.Sprintf("BaiLan: 无法解析 %s 的真实 IP，已阻止回环", host)))
+		s.log.Log(fmt.Sprintf("[DNS] 无法解析 %s 真实 IP，已拦截回环（检查 DNS 是否可用）", host))
+		return
+	}
+	target := "https://" + host + r.URL.RequestURI()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(body))
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	copyRequestHeaders(req.Header, r.Header, nil)
+	req.Host = host
+	req.ContentLength = int64(len(body))
+	s.log.Log(fmt.Sprintf("[PASSTHROUGH] %s%s", host, r.URL.RequestURI()))
+	resp, err := s.originClient.Do(req)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("BaiLan passthrough error: " + err.Error()))
+		s.log.Log(fmt.Sprintf("[PASSTHROUGH-ERR] %s%s · %v", host, r.URL.RequestURI(), err))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		streamResponse(w, resp)
+		return
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxCatalogBytes+1))
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		s.log.Log(fmt.Sprintf("[模型目录] %s 读取失败：%v", lastSegment(r.URL.Path), err))
+		return
+	}
+	if len(payload) > maxCatalogBytes {
+		copyResponseHeaders(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(payload)
+		_, _ = io.Copy(w, resp.Body)
+		if s.log != nil {
+			s.log.Log(fmt.Sprintf("[模型目录] %s 响应 %dB 超过上限，未写入", lastSegment(r.URL.Path), len(payload)))
+		}
+		return
+	}
+	plain := payload
+	gzipped := strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip")
+	if gzipped {
+		if decoded, derr := gunzipPayload(payload); derr == nil {
+			plain = decoded
+		}
+	}
+	out, added, augErr := devincatalog.Augment(plain, resp.Header.Get("Content-Type"), r.URL.Path, config.Models())
+	copyResponseHeaders(w.Header(), resp.Header)
+	if augErr != nil || added == 0 || out == nil {
+		s.noteCatalog(r.URL.Path, 0, augErr)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(payload)
+		return
+	}
+	w.Header().Del("Content-Encoding")
+	w.Header().Del("Content-Length")
+	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(out)
+	s.noteCatalog(r.URL.Path, added, nil)
+}
+
+func gunzipPayload(payload []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(io.LimitReader(reader, maxCatalogBytes+1))
+}
+
+func (s *Server) noteCatalog(path string, added int, err error) {
+	if s.log == nil || (err == nil && added == 0) {
+		return
+	}
+	stamp := path
+	var message string
+	if err != nil {
+		stamp += "|err|" + err.Error()
+		message = fmt.Sprintf("[模型目录] %s 写入失败，已回传官方目录：%v", lastSegment(path), err)
+	} else {
+		ids := make([]string, 0)
+		for _, model := range config.Models() {
+			ids = append(ids, model.ID)
+		}
+		stamp += "|" + strings.Join(ids, ",")
+		message = fmt.Sprintf("[模型目录] %s 已写入 Devin 列表 · %d 个", lastSegment(path), added)
+	}
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+	if s.catalogStamp == stamp {
+		return
+	}
+	s.catalogStamp = stamp
+	s.log.Log(message)
+}
+
 // ModelGoneMessage 生成「所选模型已不存在」的用户提示。
+func trimLogModel(model string) string {
+	model = strings.TrimSpace(model)
+	if len(model) > 80 {
+		return model[:80]
+	}
+	return model
+}
+
 func ModelGoneMessage(model string) string {
 	return fmt.Sprintf("所选模型「%s」已下线或不存在，请打开「%s」软件重新选择模型后再试", model, config.AppTitle)
 }
@@ -302,8 +463,42 @@ func (s *Server) rejectModelGone(w http.ResponseWriter, r *http.Request, model s
 	_, _ = w.Write([]byte(msg))
 }
 
+// NoWalletMessage 生成「没有可用的效益包和余额」的用户提示。
+func NoWalletMessage() string {
+	return fmt.Sprintf("当前没有可用的效益包，余额也为 0，无法发送消息。请打开「%s」的「商城」：开通效益包后可使用免费模型，充值余额后可使用高级模型", config.AppTitle)
+}
+
+// walletMissing 表示接入了授权模块、但当前拿不到授权令牌：用户还没有钱包，或钱包已经失效。
+func (s *Server) walletMissing() bool {
+	s.mu.RLock()
+	provider := s.tokenProvider
+	s.mu.RUnlock()
+	if provider == nil {
+		return false
+	}
+	token, _, _ := provider()
+	return token == ""
+}
+
+// rejectNoWallet 在本地拒绝没有钱包时发出的对话请求，并以 IDE 能展示的格式返回提示：
+// Connect 流式请求 → HTTP 200 + 错误 trailer 帧；其它 → HTTP 402 + 文本（与中继余额不足时一致）。
+func (s *Server) rejectNoWallet(w http.ResponseWriter, r *http.Request) {
+	msg := NoWalletMessage()
+	s.logLine("[未开通] 没有可用的效益包或余额，对话请求已在本地拦截，请到商城开通效益包或充值")
+	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "connect") {
+		w.Header().Set("Content-Type", "application/connect+proto")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(connectframe.ErrorTrailer(msg, "resource_exhausted"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusPaymentRequired)
+	_, _ = w.Write([]byte(msg))
+}
+
 // forwardRelay 把 GetChatMessage 请求转发到中继 /relay。
-// 客户端只通过请求头声明目标模型，protobuf 的解析与改写统一由服务端完成一次。
+// Devin 里选中的目录模型优先作为 X-Override-Model；仍是 SWE-1.6 时用 Hub 保存的默认模型。
+// protobuf 的改写仍由中继服务端完成。
 func (s *Server) forwardRelay(w http.ResponseWriter, r *http.Request, host string, body []byte, relayBase, relayToken string) {
 	if relayBase == "" {
 		w.WriteHeader(http.StatusBadGateway)
@@ -311,14 +506,61 @@ func (s *Server) forwardRelay(w http.ResponseWriter, r *http.Request, host strin
 		s.log.Log("[Manager] 未配置中继服务器，无法转发")
 		return
 	}
+	// 拦截不需要先开通就能启动，但没有钱包时发不了消息。这里只拦对话，并且在本地拦：
+	// 中继没开卡密校验时不会替我们拒绝，其它接口则照常交给中继决定。
+	if strings.Contains(r.URL.Path, "GetChatMessage") && s.walletMissing() {
+		s.rejectNoWallet(w, r)
+		return
+	}
 
 	model := s.currentModel()
+	fromDevin := false
+	rawModel := ""
+	if strings.Contains(r.URL.Path, "GetChatMessage") {
+		rawModel = connectframe.ChatModel(body)
+	}
+	var picked devincatalog.RelayChoice
+	sessionRouted := false
+	if choice, ok := devincatalog.SelectedRelayChoice(rawModel); ok {
+		model = choice.Model
+		fromDevin = true
+		picked = choice
+		// 档位留在请求头里。请求体里的模型名还原成目录 ID，避免中继把档位串当成未知模型拒绝。
+		if strings.Contains(r.URL.Path, "GetChatMessage") && choice.Model != "" {
+			isConnect := strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "connect")
+			body = connectframe.ReplaceChatModel(body, choice.Model, isConnect)
+		}
+	} else if strings.Contains(r.URL.Path, "GetChatMessage") {
+		ids := connectframe.ChatSessionIDs(body)
+		choice, key, ok := s.sessionChoice(ids)
+		if !ok {
+			choice, key, ok = s.sessionChoiceFromBody(body)
+		}
+		if ok {
+			model = choice.Model
+			fromDevin = true
+			sessionRouted = true
+			picked = devincatalog.RelayChoice{Model: choice.Model, Effort: choice.Effort, Context: choice.Context}
+			_ = key
+		} else if len(ids) > 0 {
+			shown := ids
+			if len(shown) > 4 {
+				shown = shown[:4]
+			}
+			s.log.Log("[转发对照] " + strings.Join(shown, " | "))
+		}
+	}
 	effectiveModel := model
 	overrideHeader := ""
 	var modelOpt config.ModelOption
 	if strings.Contains(r.URL.Path, "GetChatMessage") && model != "" {
 		overrideHeader = model
-		modelOpt = s.currentModelOption(model)		// 用户本地保存的模型已被后台隐藏/删除时，不再向中继发请求，直接告知用户。
+		// Devin 里选中的思考/上下文档位优先；只选了基础模型时仍用 Hub 里保存的档位。
+		if fromDevin && (picked.Effort != "" || picked.Context > 0) {
+			modelOpt = config.ValidModelOption(model, config.ModelOption{Effort: picked.Effort, Context: picked.Context})
+		} else {
+			modelOpt = s.currentModelOption(model)
+		}
 		if !config.ModelInCatalog(model) {
 			s.rejectModelGone(w, r, model)
 			return
@@ -366,7 +608,25 @@ func (s *Server) forwardRelay(w http.ResponseWriter, r *http.Request, host strin
 
 	label := config.ModelLabel(effectiveModel)
 	plan := s.upload.plan(relayBase, body)
-	s.log.Log(fmt.Sprintf("[会话等待] 模型：%s · 请求：%dB · %s · 正在等待中继响应头", label, len(body), plan.describe(len(body))))
+	origin := ""
+	if fromDevin {
+		origin = " · 来自 Devin"
+		if rawModel != "" && !strings.EqualFold(rawModel, model) {
+			origin += " · 原文：" + trimLogModel(rawModel)
+		}
+	} else if rawModel != "" {
+		origin += " · Devin 原文未识别：" + trimLogModel(rawModel)
+	}
+	if sessionRouted {
+		origin += " · 按会话"
+	}
+	if modelOpt.Effort != "" {
+		origin += " · 思考：" + modelOpt.Effort
+	}
+	if modelOpt.Context > 0 {
+		origin += fmt.Sprintf(" · 上下文：%d", modelOpt.Context)
+	}
+	s.log.Log(fmt.Sprintf("[会话等待] 模型：%s%s · 请求：%dB · %s · 正在等待中继响应头", label, origin, len(body), plan.describe(len(body))))
 
 	// 只在中继尚未接收请求时重试（拨号失败 / 平滑重启关闭的空闲连接），最长等 relayReconnectWindow；
 	// ctx 取消（IDE 放弃）与中继已开始处理后的错误不重试，避免重复处理。
@@ -450,6 +710,13 @@ func (s *Server) forwardRelay(w http.ResponseWriter, r *http.Request, host strin
 		return
 	}
 	s.log.Log(fmt.Sprintf("[会话完成] 模型：%s · 首包：%s · 总耗时：%.3fs · %dB/%d块", label, firstByte, stats.EndAt.Sub(requestStart).Seconds(), stats.Bytes, stats.Chunks))
+}
+
+func (s *Server) logLine(format string, args ...any) {
+	if s.log == nil {
+		return
+	}
+	s.log.Log(fmt.Sprintf(format, args...))
 }
 
 func (s *Server) requestHost(r *http.Request) string {

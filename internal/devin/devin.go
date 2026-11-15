@@ -130,14 +130,20 @@ func Stop(executable string) (bool, string) {
 func Restart(executable string) (bool, string) {
 	devinExe := DiscoverExecutable(executable)
 	if devinExe == "" {
-		target := executable
-		if target == "" {
-			target = defaultExecutable
+		if target := strings.TrimSpace(executable); target != "" {
+			return false, "Devin 程序不存在: " + target
 		}
-		return false, "Devin 程序不存在: " + target
+		return false, "未找到 Devin 程序，请在设置里选择 Devin.exe"
 	}
 	if ok, message := Stop(devinExe); !ok {
 		return false, message
+	}
+	// 进程退出后再写更新开关，避免 Devin 退出时用内存里的设置把这一项盖掉。
+	_ = SetUpdateBlocked(config.Load().BlockDevinUpdate)
+	// Devin 已关掉，这时把产品需要的列表和叫醒写进安装目录，接着打开才会用上。
+	patched, patchMsg := ApplyClientPatches(devinExe)
+	if patched {
+		clearDevinScriptCache()
 	}
 	if err := launch(devinExe); err != nil {
 		return false, "Devin 自动重启失败: " + err.Error()
@@ -145,7 +151,11 @@ func Restart(executable string) (bool, string) {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if isRunning(devinExe) {
-			return true, "Devin 已自动重启: " + devinExe
+			message := "Devin 已自动重启: " + devinExe
+			if patchMsg != "" {
+				message += "；" + patchMsg
+			}
+			return true, message
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

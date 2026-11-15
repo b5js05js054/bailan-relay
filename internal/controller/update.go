@@ -104,8 +104,12 @@ func (c *Controller) clientBundle(force bool) clientBundle {
 	bundle, err := c.fetchClientBundle()
 	if err == nil {
 		if len(bundle.models) > 0 {
+			before := config.CatalogEpoch()
 			config.SetSelectableModels(bundle.models)
 			bundle.models = config.Models()
+			if config.CatalogEpoch() != before && c.log != nil {
+				c.log.Log("[模型目录] 后台模型有变化，已通知 Devin 重新获取")
+			}
 		} else {
 			bundle.models = config.Models()
 		}

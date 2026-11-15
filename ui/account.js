@@ -1,4 +1,4 @@
-// account.js —— 账号：登录 / 注册（头像必传）/ 自定义背景（仅存本地）/ 退出登录。
+// account.js —— 账号：登录 / 注册（头像可选，不选则生成默认头像）/ 自定义背景（仅存本地）/ 退出登录。
 // 依赖 app.js 的全局：$、$$、callApi、errorMessage、toast、setButtonBusy、setUserMenuOpen、
 // confirmAction、formatDownloadBytes、pollStatus。头像上传由 Go 侧发送并计字节，这里轮询进度。
 
@@ -6,7 +6,59 @@ const EMAIL_RE = /^[1-9][0-9]{4,11}@qq\.com$/;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 const AVATAR_MAX = 2 * 1024 * 1024;
 const BACKGROUND_MAX = 5 * 1024 * 1024;
+const BG_DIM_STORAGE_KEY = "bailan.ui.bgDim";
+const BG_DIM_DEFAULT = 40;
+const PRODUCT_NAME = "DevinHub";
+const SUPPORT_QQ_GROUP = "386427683";
 const accountState = { loggedIn: null, user: null, mode: "login", avatar: null, uploading: false };
+
+function readBgDimPercent() {
+    try {
+        const n = Number(localStorage.getItem(BG_DIM_STORAGE_KEY));
+        if (Number.isFinite(n)) return Math.min(85, Math.max(0, Math.round(n / 5) * 5));
+    } catch { /* ignore */ }
+    return BG_DIM_DEFAULT;
+}
+
+function paintProfileBgPreview(el, url) {
+    const preview = el || $("#profileBgPreview");
+    if (!preview) return;
+    const img = $("#profileBgImg") || preview.querySelector(".profile-bg-img");
+    const bg = String(url || "").trim();
+    preview.classList.toggle("has-image", Boolean(bg));
+    if (bg) {
+        preview.style.backgroundImage = `url("${bg}")`;
+        preview.style.backgroundSize = "cover";
+        preview.style.backgroundPosition = "center";
+        preview.style.backgroundRepeat = "no-repeat";
+        if (img) {
+            img.src = bg;
+            img.hidden = false;
+        }
+    } else {
+        preview.style.backgroundImage = "";
+        preview.style.backgroundSize = "";
+        preview.style.backgroundPosition = "";
+        preview.style.backgroundRepeat = "";
+        if (img) {
+            img.hidden = true;
+            img.removeAttribute("src");
+        }
+    }
+}
+
+function applyBgDimPercent(percent, { persist = false } = {}) {
+    const value = Math.min(85, Math.max(0, Math.round(Number(percent) / 5) * 5));
+    document.documentElement.style.setProperty("--user-bg-dim", String(value));
+    const slider = $("#profileBgOpacity");
+    const out = $("#profileBgOpacityOut");
+    if (slider) slider.value = String(value);
+    if (out) out.textContent = `${value}%`;
+    if (persist) {
+        try { localStorage.setItem(BG_DIM_STORAGE_KEY, String(value)); } catch { /* ignore */ }
+    }
+    return value;
+}
 
 // paintAvatar 输入：头像元素、图片地址（空则显示默认图标）。输出：无。
 function paintAvatar(el, url) {
@@ -25,17 +77,31 @@ function renderAccount(account) {
     document.body.classList.toggle("logged-out", !loggedIn);
     $("#authOverlay").hidden = loggedIn;
     if (!loggedIn) setUserMenuOpen(false);
-    $("#userChipEmail").textContent = user?.email || "未登录";
-    $("#userMenuEmail").textContent = user?.email || "未登录";
+    const chipEmail = $("#userChipEmail");
+    if (chipEmail) chipEmail.textContent = user?.email || "未登录";
+    const name = displayName(user);
+    const navName = $("#navUserName");
+    if (navName) navName.textContent = name;
     paintAvatar($("#userChipAvatar"), user?.avatar_url);
-    paintAvatar($("#userMenuAvatar"), user?.avatar_url);
+    paintAvatar($("#profileAvatar"), user?.avatar_url);
+    const profileName = $("#profileName");
+    const profileEmail = $("#profileEmail");
+    if (profileName) profileName.textContent = name;
+    if (profileEmail) profileEmail.textContent = user?.email || "未登录";
     const brandMark = $("#brandMark");
-    brandMark.classList.toggle("has-image", Boolean(user?.avatar_url));
-    brandMark.style.backgroundImage = user?.avatar_url ? `url("${user.avatar_url}")` : "";
+    if (brandMark) {
+        brandMark.classList.toggle("has-image", Boolean(user?.avatar_url));
+        brandMark.style.backgroundImage = user?.avatar_url ? `url("${user.avatar_url}")` : "";
+    }
     const bg = user?.background_url || "";
     document.body.classList.toggle("has-custom-bg", Boolean(bg));
     document.body.style.setProperty("--user-bg", bg ? `url("${bg}")` : "none");
-    $("#resetBgBtn").hidden = !bg;
+    const profileReset = $("#profileResetBgBtn");
+    if (profileReset) profileReset.hidden = !bg;
+    const opacityWrap = $("#profileBgOpacityWrap");
+    if (opacityWrap) opacityWrap.hidden = !bg;
+    if (bg) applyBgDimPercent(readBgDimPercent());
+    paintProfileBgPreview($("#profileBgPreview"), bg);
 }
 
 // refreshAccount 启动时调用：Go 侧向后台校验令牌（失效自动登出）后渲染。
@@ -49,8 +115,60 @@ async function refreshAccount() {
     }
 }
 
+function displayName(user) {
+    const nick = String(user?.nickname || "").trim();
+    if (nick) return nick;
+    return user?.email ? user.email.split("@")[0] : PRODUCT_NAME;
+}
+
+function setProfileNameEditing(editing) {
+    const input = $("#profileNameInput");
+    const name = $("#profileName");
+    const button = $("#profileEditNameBtn");
+    if (!input || !name) return;
+    input.hidden = !editing;
+    name.hidden = editing;
+    if (button) button.hidden = editing;
+    if (editing) {
+        input.value = name.textContent || "";
+        input.focus();
+        input.select();
+    }
+}
+
+let savingProfileName = false;
+
+async function saveProfileName() {
+    const input = $("#profileNameInput");
+    if (!input || input.hidden || savingProfileName) return;
+    savingProfileName = true;
+    const name = input.value.trim();
+    if ([...name].length > 20) {
+        toast("昵称最多 20 个字", "error");
+        input.focus();
+        return;
+    }
+    try {
+        const result = await callApi("user_set_nickname", { name });
+        if (!result?.ok) throw new Error(result?.message || "保存失败");
+        renderAccount(result.account);
+        setProfileNameEditing(false);
+        toast(name ? "昵称已更新" : "已恢复默认昵称");
+    } catch (error) {
+        toast(`昵称保存失败：${errorMessage(error)}`, "error");
+    } finally {
+        savingProfileName = false;
+    }
+}
+
 function setAuthError(message) {
     $("#authError").textContent = message || "";
+    if (message) setAuthHint("");
+}
+
+// setAuthHint 输入：中性提示文案（空串则清除）。输出：无。和报错分开显示，不用红色。
+function setAuthHint(message) {
+    $("#authHint").textContent = message || "";
 }
 
 function setAuthMode(mode) {
@@ -58,12 +176,50 @@ function setAuthMode(mode) {
     const register = mode === "register";
     $("#authForm").dataset.mode = mode;
     $$("[data-auth-mode]").forEach((btn) => btn.classList.toggle("active", btn.dataset.authMode === mode));
-    $("#authTitle").textContent = register ? "注册白岚账号" : "登录白岚";
-    $("#authSubtitle").textContent = register ? "仅支持 QQ 邮箱注册，需要上传头像" : "使用 QQ 邮箱账号登录后即可使用";
+    $("#authTitle").textContent = register ? `注册 ${PRODUCT_NAME} 账号` : `登录 ${PRODUCT_NAME}`;
+    $("#authSubtitle").textContent = register ? "仅支持 QQ 邮箱注册" : "使用 QQ 邮箱账号登录后即可使用";
     $("#authSubmit").textContent = register ? "注册并登录" : "登录";
     $("#authPassword").autocomplete = register ? "new-password" : "current-password";
     $("#authProgress").hidden = true;
     setAuthError("");
+    setAuthHint("");
+}
+
+// handleForgotPassword 后台没有自助重置密码的接口，这里把客服入口交到用户手上：复制群号并说明去哪找人。
+async function handleForgotPassword() {
+    setAuthError("");
+    let copied = false;
+    try {
+        await navigator.clipboard.writeText(SUPPORT_QQ_GROUP);
+        copied = true;
+    } catch { /* 复制失败时群号仍写在提示里 */ }
+    setAuthHint(`重置密码请到 QQ 交流群 ${SUPPORT_QQ_GROUP} 联系管理员${copied ? "，群号已复制" : ""}。`);
+}
+
+// defaultAvatar 输入：邮箱。输出：{dataUrl, name}。注册时没选头像就用它：按邮箱定一个底色，画上默认人像。
+// 后台的注册接口要求带头像文件，这样不改接口也能把头像变成可选；之后可在个人页随时更换。
+function defaultAvatar(email) {
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    let hash = 0;
+    for (const ch of String(email)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    const hue = hash % 360;
+    const fill = ctx.createLinearGradient(0, 0, size, size);
+    fill.addColorStop(0, `hsl(${hue}, 62%, 58%)`);
+    fill.addColorStop(1, `hsl(${(hue + 40) % 360}, 58%, 42%)`);
+    ctx.fillStyle = fill;
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "rgba(255, 255, 255, .92)";
+    ctx.beginPath();
+    ctx.arc(size / 2, size * 0.4, size * 0.17, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(size / 2, size, size * 0.33, size * 0.34, 0, Math.PI, 0);
+    ctx.fill();
+    return { dataUrl: canvas.toDataURL("image/png"), name: "avatar.png" };
 }
 
 // checkImage 输入：File、大小上限、用途文案。输出：错误文案（合法返回空串）。
@@ -167,7 +323,6 @@ function validateAuthForm() {
     const error = !EMAIL_RE.test(email) ? "请输入正确的 QQ 邮箱（数字@qq.com）"
         : password.length < 6 || password.length > 64 ? "密码长度需为 6 ~ 64 位"
         : register && password !== $("#authConfirm").value ? "两次输入的密码不一致"
-        : register && !accountState.avatar ? "注册需要上传头像"
         : "";
     setAuthError(error);
     return error ? null : { email, password };
@@ -180,14 +335,18 @@ async function handleAuthSubmit(event) {
     if (!form) return;
     const button = $("#authSubmit");
     setButtonBusy(button, true);
+    setAuthHint("");
     try {
         const result = accountState.mode === "register"
-            ? await withUploadProgress(() => callApi("user_register", {
-                email: form.email,
-                password: form.password,
-                avatar: accountState.avatar.dataUrl,
-                filename: accountState.avatar.name,
-            }))
+            ? await withUploadProgress(() => {
+                const avatar = accountState.avatar || defaultAvatar(form.email);
+                return callApi("user_register", {
+                    email: form.email,
+                    password: form.password,
+                    avatar: avatar.dataUrl,
+                    filename: avatar.name,
+                });
+            })
             : await callApi("user_login", form.email, form.password);
         if (!result?.ok) throw new Error(result?.message || "操作失败");
         $("#authPassword").value = "";
@@ -210,6 +369,30 @@ function applyAccountResult(result) {
     if (result?.account) renderAccount(result.account);
     if (!result?.ok) throw new Error(result?.message || "操作失败");
     toast(result.message || "已完成");
+}
+
+async function handleProfileAvatar(image) {
+    if (!image) return;
+    const problem = checkImage(image, AVATAR_MAX, "头像");
+    if (problem) {
+        toast(problem, "error");
+        return;
+    }
+    const button = $("#profileAvatarBtn");
+    const tip = button?.querySelector(".profile-avatar-tip span");
+    button?.classList.add("is-busy");
+    if (button) button.disabled = true;
+    if (tip) tip.textContent = "上传中";
+    try {
+        const dataUrl = image.dataUrl || await readAsDataURL(image.file);
+        applyAccountResult(await callApi("user_set_avatar", { image: dataUrl }));
+    } catch (error) {
+        toast(`更换头像失败：${errorMessage(error)}`, "error");
+    } finally {
+        button?.classList.remove("is-busy");
+        if (button) button.disabled = false;
+        if (tip) tip.textContent = "更换";
+    }
 }
 
 // handleBackgroundPick 选图后交给 Go 侧保存到本地（按账号区分），不上传服务器。
@@ -255,6 +438,7 @@ async function handleLogout() {
 function bindAccountEvents() {
     $$("[data-auth-mode]").forEach((btn) => btn.addEventListener("click", () => setAuthMode(btn.dataset.authMode)));
     $("#authForm").addEventListener("submit", handleAuthSubmit);
+    $("#authForgotBtn").addEventListener("click", handleForgotPassword);
     $("#avatarInput").addEventListener("change", async (e) => handleAvatarPick(await fileImage(e)));
     $("#avatarPicker").addEventListener("click", async (e) => {
         if (state.platform !== "darwin" || !state.native) return;
@@ -265,14 +449,45 @@ function bindAccountEvents() {
             setAuthError(errorMessage(error));
         }
     });
-    $("#changeBgBtn").addEventListener("click", async () => {
+    const changeBackground = async () => {
         try {
             await handleBackgroundPick(await pickImage("背景图", $("#bgFileInput")));
         } catch (error) {
             toast(`更换背景失败：${errorMessage(error)}`, "error");
         }
+    };
+    if ($("#profileChangeBgBtn")) $("#profileChangeBgBtn").addEventListener("click", changeBackground);
+    if ($("#profileResetBgBtn")) $("#profileResetBgBtn").addEventListener("click", handleResetBackground);
+    const opacityWrap = $("#profileBgOpacityWrap");
+    if (opacityWrap) {
+        opacityWrap.addEventListener("mousedown", (event) => event.stopPropagation());
+    }
+    if ($("#profileBgOpacity")) {
+        $("#profileBgOpacity").addEventListener("input", (e) => applyBgDimPercent(e.target.value, { persist: true }));
+    }
+    applyBgDimPercent(readBgDimPercent());
+    if ($("#profileEditNameBtn")) $("#profileEditNameBtn").addEventListener("click", () => setProfileNameEditing(true));
+    if ($("#profileNameInput")) {
+        $("#profileNameInput").addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                saveProfileName();
+            } else if (event.key === "Escape") {
+                setProfileNameEditing(false);
+            }
+        });
+        $("#profileNameInput").addEventListener("blur", () => saveProfileName());
+    }
+    if ($("#profileAvatarBtn")) $("#profileAvatarBtn").addEventListener("click", async () => {
+        try {
+            await handleProfileAvatar(await pickImage("头像", $("#profileAvatarInput")));
+        } catch (error) {
+            toast(`更换头像失败：${errorMessage(error)}`, "error");
+        }
     });
-    $("#bgFileInput").addEventListener("change", async (e) => handleBackgroundPick(await fileImage(e)));
-    $("#resetBgBtn").addEventListener("click", handleResetBackground);
+    if ($("#profileAvatarInput")) {
+        $("#profileAvatarInput").addEventListener("change", async (e) => handleProfileAvatar(await fileImage(e)));
+    }
+    if ($("#bgFileInput")) $("#bgFileInput").addEventListener("change", async (e) => handleBackgroundPick(await fileImage(e)));
     $("#logoutBtn").addEventListener("click", handleLogout);
 }

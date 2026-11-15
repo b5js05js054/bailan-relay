@@ -28,6 +28,7 @@ import (
 type Profile struct {
 	ID            int    `json:"id"`
 	Email         string `json:"email"`
+	Nickname      string `json:"nickname,omitempty"`
 	AvatarURL     string `json:"avatar_url"`
 	BackgroundURL string `json:"background_url"`
 }
@@ -56,8 +57,11 @@ var FileNameRE = regexp.MustCompile(`^[0-9a-f]{32}\.(png|jpg|gif|webp)$`)
 
 const uploadTimeout = 5 * time.Minute
 
-// BackgroundMaxBytes 本地背景图大小上限。
-const BackgroundMaxBytes = 5 << 20
+// BackgroundMaxBytes 本地背景图大小上限。AvatarMaxBytes 是本地头像上限。
+const (
+	BackgroundMaxBytes = 5 << 20
+	AvatarMaxBytes     = 2 << 20
+)
 
 // backgroundExts 按内容嗅探出的 MIME → 本地扩展名。
 var backgroundExts = map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
@@ -106,7 +110,75 @@ func (m *Manager) Session() (Profile, bool) {
 			p.BackgroundURL = fmt.Sprintf("/userbg/?v=%d", st.ModTime().UnixNano())
 		}
 	}
+	if path, found := m.avatarFile(p.ID); ok && found {
+		if st, err := os.Stat(path); err == nil {
+			p.AvatarURL = fmt.Sprintf("/useravatar/?v=%d", st.ModTime().UnixNano())
+		}
+	}
 	return p, ok
+}
+
+// SetAvatar 把图片保存为当前账号的本地头像，顶栏和个人页都读这一份。
+func (m *Manager) SetAvatar(image []byte) (Profile, error) {
+	p, ok := m.Session()
+	if !ok {
+		return Profile{}, ErrUnauthorized
+	}
+	if len(image) > AvatarMaxBytes {
+		return Profile{}, fmt.Errorf("头像不能超过 2MB")
+	}
+	ext, valid := backgroundExts[http.DetectContentType(image)]
+	if !valid {
+		return Profile{}, fmt.Errorf("头像仅支持 jpg / png / webp / gif")
+	}
+	if err := m.removeAvatar(p.ID); err != nil {
+		return Profile{}, err
+	}
+	dir := m.avatarDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Profile{}, fmt.Errorf("保存头像失败：%w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("user-%d%s", p.ID, ext)), image, 0o644); err != nil {
+		return Profile{}, fmt.Errorf("保存头像失败：%w", err)
+	}
+	p, _ = m.Session()
+	return p, nil
+}
+
+// AvatarFile 输出当前账号的本地头像路径。
+func (m *Manager) AvatarFile() (string, bool) {
+	p, ok := m.Session()
+	if !ok {
+		return "", false
+	}
+	return m.avatarFile(p.ID)
+}
+
+func (m *Manager) avatarDir() string { return filepath.Join(filepath.Dir(m.path), "avatars") }
+
+func (m *Manager) avatarFile(id int) (string, bool) {
+	if id <= 0 {
+		return "", false
+	}
+	for _, ext := range backgroundExts {
+		path := filepath.Join(m.avatarDir(), fmt.Sprintf("user-%d%s", id, ext))
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func (m *Manager) removeAvatar(id int) error {
+	for {
+		path, ok := m.avatarFile(id)
+		if !ok {
+			return nil
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("保存头像失败：%w", err)
+		}
+	}
 }
 
 // Validate 向后台确认会话仍有效并刷新资料。令牌失效则清空会话；网络错误保留本地会话（离线可继续展示）。
@@ -124,6 +196,26 @@ func (m *Manager) Validate() (Profile, bool) {
 		m.setUser(out.User)
 	}
 	return m.Session()
+}
+
+// SetNickname 把昵称存在本机账号资料里，不上传服务器。空字符串恢复为邮箱前缀。
+func (m *Manager) SetNickname(name string) (Profile, error) {
+	if _, ok := m.Session(); !ok {
+		return Profile{}, ErrUnauthorized
+	}
+	name = strings.TrimSpace(name)
+	if len([]rune(name)) > 20 {
+		return Profile{}, fmt.Errorf("昵称最多 20 个字")
+	}
+	if strings.ContainsAny(name, "\r\n\t") {
+		return Profile{}, fmt.Errorf("昵称不能包含换行")
+	}
+	m.mu.Lock()
+	m.state.User.Nickname = name
+	m.persistLocked()
+	m.mu.Unlock()
+	p, _ := m.Session()
+	return p, nil
 }
 
 // Login 输入邮箱/密码，成功后保存会话并返回资料。
@@ -262,6 +354,9 @@ func (m *Manager) saveSession(out *sessionResponse, err error) (Profile, error) 
 	}
 	out.User = localize(out.User)
 	m.mu.Lock()
+	if m.state.User.ID == out.User.ID && out.User.Nickname == "" {
+		out.User.Nickname = m.state.User.Nickname
+	}
 	m.state = state{Token: out.Token, ExpiresAt: out.ExpiresAt, User: out.User}
 	m.persistLocked()
 	m.mu.Unlock()
@@ -271,7 +366,13 @@ func (m *Manager) saveSession(out *sessionResponse, err error) (Profile, error) 
 
 func (m *Manager) setUser(p Profile) {
 	m.mu.Lock()
-	m.state.User = localize(p)
+	nick := m.state.User.Nickname
+	same := m.state.User.ID == p.ID
+	p = localize(p)
+	if p.Nickname == "" && same {
+		p.Nickname = nick
+	}
+	m.state.User = p
 	m.persistLocked()
 	m.mu.Unlock()
 }

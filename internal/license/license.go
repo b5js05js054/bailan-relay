@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,6 +83,7 @@ type tokenResponse struct {
 	CardExpiresAt  *time.Time `json:"card_expires_at"`
 	DurationDays   int        `json:"duration_days"`
 	Message        string     `json:"message"`
+	CardKey        string     `json:"card_key"`
 
 	Balance        float64 `json:"balance"`
 	BillingEnabled bool    `json:"billing_enabled"`
@@ -145,8 +147,16 @@ func (m *Manager) persistLocked() {
 	_ = os.WriteFile(m.statePath, append(data, '\n'), 0o600)
 }
 
-// Activate 用卡密激活并绑定当前设备。
+// Activate 用卡密开通效益包。
+// 本机还没有钱包时，这张卡密绑定本机、自己成为钱包；已有钱包时，卡密的天数和附带余额并入钱包，
+// 钱包里原有的余额不动。所以成功后在用的卡密以后台返回的为准，不一定是输入的这张。
 func (m *Manager) Activate(cardKey string) (bool, string) {
+	return m.activate(cardKey, true)
+}
+
+// activate 提交卡密并保存后台返回的钱包与令牌。
+// redeem=false 只把这张卡绑定到本机（充值后自动开通用），不走兑换并入。
+func (m *Manager) activate(cardKey string, redeem bool) (bool, string) {
 	cardKey = strings.ToUpper(strings.TrimSpace(cardKey))
 	if cardKey == "" {
 		return false, "请输入卡密"
@@ -163,7 +173,16 @@ func (m *Manager) Activate(cardKey string) (bool, string) {
 	}
 
 	body := map[string]string{"card_key": cardKey, "device_id": deviceID, "device_name": deviceName}
-	resp, err := m.post(apiURL+"/api/license/activate", userToken, body)
+	var resp *tokenResponse
+	var err error
+	if redeem {
+		resp, err = m.post(apiURL+"/api/license/pack/redeem", userToken, body)
+		// 后台还没有商城接口：退回原来的激活接口，输入的卡密自己就是钱包。
+		redeem = !endpointMissing(err)
+	}
+	if !redeem {
+		resp, err = m.post(apiURL+"/api/license/activate", userToken, body)
+	}
 	if err != nil {
 		return false, err.Error()
 	}
@@ -174,9 +193,71 @@ func (m *Manager) Activate(cardKey string) (bool, string) {
 		m.mu.Unlock()
 		return false, resp.Message
 	}
+	wallet := strings.ToUpper(strings.TrimSpace(resp.CardKey))
+	if wallet == "" {
+		wallet = cardKey
+	}
+	m.commitLicense(wallet, resp)
+	if m.log != nil {
+		m.log.Log("[授权] 卡密兑换成功，效益包" + expText(resp.CardExpiresAt))
+	}
+	if msg := strings.TrimSpace(resp.Message); redeem && msg != "" {
+		return true, msg
+	}
+	return true, "激活成功"
+}
 
+// endpointMissing 判断错误是不是「后台没有这个接口」（旧版后台），而不是接口自己返回的 404。
+func endpointMissing(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.Status == http.StatusNotFound && (se.Detail == "" || se.Detail == "Not Found")
+}
+
+// Restore 本机数据清掉后，按设备指纹找回这台电脑已绑定的卡。
+func (m *Manager) Restore() (bool, string) {
+	if m.Valid() {
+		return true, "已激活"
+	}
+	m.mu.RLock()
+	apiURL, deviceID, deviceName := m.apiURL, m.state.DeviceID, m.deviceName
+	m.mu.RUnlock()
+	if apiURL == "" {
+		return false, "未配置授权服务器地址"
+	}
+	userToken := m.accountToken()
+	if userToken == "" {
+		return false, "请先登录账号"
+	}
+	resp, err := m.post(apiURL+"/api/license/restore", userToken, map[string]string{
+		"device_id": deviceID, "device_name": deviceName,
+	})
+	if err != nil {
+		return false, err.Error()
+	}
+	if !resp.OK {
+		m.mu.Lock()
+		m.state.LastMessage = resp.Message
+		m.persistLocked()
+		m.mu.Unlock()
+		return false, resp.Message
+	}
+	key := strings.ToUpper(strings.TrimSpace(resp.CardKey))
+	m.commitLicense(key, resp)
+	if m.log != nil {
+		m.log.Log("[授权] 已按本机设备恢复钱包，效益包" + expText(resp.CardExpiresAt))
+	}
+	return true, "已恢复本机授权"
+}
+
+// commitLicense 保存后台签发的令牌和钱包状态。cardKey 为空时用后台返回的卡密；两者都没有则沿用本机现有的。
+func (m *Manager) commitLicense(cardKey string, resp *tokenResponse) {
+	if cardKey == "" {
+		cardKey = strings.ToUpper(strings.TrimSpace(resp.CardKey))
+	}
 	m.mu.Lock()
-	m.state.CardKey = cardKey
+	if cardKey != "" {
+		m.state.CardKey = cardKey
+	}
 	m.state.Token = resp.Token
 	m.state.TokenExp = resp.TokenExpiresAt
 	m.state.CardExp = resp.CardExpiresAt
@@ -186,11 +267,6 @@ func (m *Manager) Activate(cardKey string) (bool, string) {
 	m.applyBalanceLocked(resp.Balance, resp.BillingEnabled, resp.Currency)
 	m.persistLocked()
 	m.mu.Unlock()
-
-	if m.log != nil {
-		m.log.Log("[授权] 卡密激活成功，有效期至 " + expText(resp.CardExpiresAt))
-	}
-	return true, "激活成功"
 }
 
 // Refresh 心跳续期。返回 (是否有效, 消息)。
@@ -248,26 +324,7 @@ func (m *Manager) Refresh() (bool, string) {
 	return true, "ok"
 }
 
-// EnsureFresh 若令牌即将过期则同步续期，供启动闸门调用。
-func (m *Manager) EnsureFresh() (bool, string) {
-	m.mu.RLock()
-	activated := m.state.Activated
-	tokenExp := m.state.TokenExp
-	hasToken := m.state.Token != ""
-	m.mu.RUnlock()
-	if !activated {
-		return false, "尚未激活卡密"
-	}
-	if !hasToken || time.Until(tokenExp) < 5*time.Minute {
-		return m.Refresh()
-	}
-	if !m.Valid() {
-		return false, "卡密已过期"
-	}
-	return true, "ok"
-}
-
-// Valid 返回当前授权是否有效（必须有卡密且激活过）。
+// Valid 返回本机钱包当前是否可用（必须有卡密且激活过）。
 func (m *Manager) Valid() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -275,7 +332,7 @@ func (m *Manager) Valid() bool {
 	if m.state.CardKey == "" || !m.state.Activated {
 		return false
 	}
-	// 激活过期且有余额时仍可用（纯余额卡密）
+	// 效益包到期但还有余额时仍可用：高级模型继续从余额扣费
 	if m.state.CardExp != nil && m.state.CardExp.Before(time.Now()) {
 		return m.state.Balance > 0
 	}
@@ -335,13 +392,17 @@ func (m *Manager) Deactivate() {
 	m.mu.Unlock()
 }
 
-// Status 返回给前端展示的授权状态。
+// Status 返回给前端展示的钱包状态。
+// 钱包里两样东西互不影响：pack_active = 效益包在有效期内（可用免费模型），balance = 余额（高级模型扣费）。
+// 没开通过效益包（只有余额）时 card_exp 为空，pack_active 与 pack_expired 都是 false。
 func (m *Manager) Status() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	// 必须激活过才显示已激活,前端根据 valid 判断是否真的有效
 	activated := m.state.Activated
 	valid := activated && (m.state.CardExp == nil || m.state.CardExp.After(time.Now()) || m.state.Balance > 0)
+	packActive := activated && m.state.CardExp != nil && m.state.CardExp.After(time.Now())
+	packExpired := activated && m.state.CardExp != nil && !packActive
 	masked := maskCode(m.state.CardKey)
 	var cardExp string
 	if m.state.CardExp != nil {
@@ -357,6 +418,8 @@ func (m *Manager) Status() map[string]any {
 	return map[string]any{
 		"activated":     activated,
 		"valid":         valid,
+		"pack_active":   packActive,
+		"pack_expired":  packExpired,
 		"card_key":      masked,
 		"device_id":     m.state.DeviceID,
 		"device_name":   m.state.DeviceName,
@@ -430,14 +493,13 @@ func (m *Manager) Redeem(topupCode string) (bool, string) {
 	}
 	// 用当前激活的卡密 code(如果有的话)
 	m.mu.RLock()
-	cardKey := m.state.CardKey
+	cardKey, deviceID, deviceName := m.state.CardKey, m.state.DeviceID, m.deviceName
 	m.mu.RUnlock()
 	var out struct {
 		tokenResponse
-		Detail  string `json:"detail"`
-		CardKey string `json:"card_key"`
+		Detail string `json:"detail"`
 	}
-	body := map[string]string{"topup_code": topupCode}
+	body := map[string]string{"topup_code": topupCode, "device_id": deviceID, "device_name": deviceName}
 	if cardKey != "" {
 		body["card_key"] = cardKey
 	}
@@ -455,8 +517,9 @@ func (m *Manager) Redeem(topupCode string) (bool, string) {
 		m.persistLocked()
 		m.mu.Unlock()
 		if !activated && out.CardKey != "" {
-			if aok, amsg := m.Activate(out.CardKey); !aok {
-				return true, "充值成功，但自动开通授权失败：" + amsg
+			// 余额所在的卡就是钱包，直接绑定到本机即可，不走兑换并入。
+			if aok, amsg := m.activate(out.CardKey, false); !aok {
+				return true, "充值成功，但钱包绑定本机失败：" + amsg
 			}
 		}
 	}
@@ -482,11 +545,74 @@ func (m *Manager) refreshIfNearExpiry() {
 }
 
 var (
-	// ErrNotActivated 本机尚未激活卡密（无可用令牌）。
-	ErrNotActivated = errors.New("请先激活卡密后再查看用量")
+	// ErrNotActivated 本机还没有可用的钱包（没开通效益包、也没充值，无可用令牌）。
+	ErrNotActivated = errors.New("请先在商城开通效益包或充值余额")
 	// ErrUsageUnsupported 后台版本较旧，没有用量查询接口。
 	ErrUsageUnsupported = errors.New("服务端暂不支持用量查询，请联系管理员升级")
+	// ErrPoolUnsupported 后台版本较旧，没有号池状态接口。
+	ErrPoolUnsupported = errors.New("服务端暂不支持号池状态，请联系管理员升级")
+	// ErrShopUnsupported 后台版本较旧，没有商城接口。
+	ErrShopUnsupported = errors.New("服务端暂不支持商城，请联系管理员升级")
 )
+
+// Shop 查询商城：在售的效益包，以及本机钱包的效益包到期时间和余额。响应 JSON 原样返回。
+// 只需要账号登录——还没有钱包的新用户也要能看到商城。
+func (m *Manager) Shop() (json.RawMessage, error) {
+	apiURL, token, ok := m.userBearer()
+	if !ok {
+		return nil, errors.New("请先登录账号")
+	}
+	m.mu.RLock()
+	deviceID := m.state.DeviceID
+	m.mu.RUnlock()
+	var out json.RawMessage
+	err := m.doJSON(http.MethodGet, apiURL+"/api/license/shop?device_id="+url.QueryEscape(deviceID), token, nil, &out)
+	if endpointMissing(err) {
+		return nil, ErrShopUnsupported
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// BuyPack 用本机钱包的余额购买效益包。返回 (是否成功, 提示)。
+// 成功后保存后台新签发的令牌：效益包到期时间已顺延，余额已扣掉售价。
+func (m *Manager) BuyPack(productID int) (bool, string) {
+	if productID <= 0 {
+		return false, "请选择要购买的效益包"
+	}
+	apiURL, userToken, ok := m.userBearer()
+	if !ok {
+		return false, "请先登录账号"
+	}
+	m.mu.RLock()
+	deviceID, deviceName := m.state.DeviceID, m.deviceName
+	m.mu.RUnlock()
+	var out tokenResponse
+	body := map[string]any{"product_id": productID, "device_id": deviceID, "device_name": deviceName}
+	err := m.doJSON(http.MethodPost, apiURL+"/api/license/shop/buy", userToken, body, &out)
+	if endpointMissing(err) {
+		return false, ErrShopUnsupported.Error()
+	}
+	if err != nil {
+		return false, "购买失败：" + err.Error()
+	}
+	if !out.OK {
+		if out.Message == "" {
+			return false, "购买失败"
+		}
+		return false, out.Message
+	}
+	m.commitLicense("", &out)
+	if m.log != nil {
+		m.log.Log("[授权] 已用余额购买效益包，效益包" + expText(out.CardExpiresAt))
+	}
+	if out.Message == "" {
+		return true, "效益包已开通"
+	}
+	return true, out.Message
+}
 
 // Usage 查询当前卡密的用量汇总、按天分模型花费与调用明细，响应 JSON 原样返回。
 // days 取 1..90（默认 30），page ≥ 1，pageSize 取 1..100（默认 20）。
@@ -530,6 +656,79 @@ func (m *Manager) Usage(days, page, pageSize int) (json.RawMessage, error) {
 	return out, nil
 }
 
+// Leaderboard 查询用量排行。metric 为 cost/tokens/calls。
+func (m *Manager) Leaderboard(rankRange, dimension, metric string, page int) (json.RawMessage, error) {
+	switch rankRange {
+	case "day", "month", "all":
+	default:
+		rankRange = "all"
+	}
+	switch dimension {
+	case "normal", "advanced", "total":
+	default:
+		dimension = "total"
+	}
+	switch metric {
+	case "cost", "tokens", "calls":
+	default:
+		metric = "cost"
+	}
+	if page < 1 {
+		page = 1
+	}
+	apiURL, token, ok := m.userBearer()
+	if !ok {
+		return nil, errors.New("请先登录账号")
+	}
+	query := fmt.Sprintf("%s/api/license/leaderboard?range=%s&dimension=%s&metric=%s&page=%d&page_size=50", apiURL, rankRange, dimension, metric, page)
+	var out json.RawMessage
+	if err := m.doJSON(http.MethodGet, query, token, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetLeaderboard 设置当前账号是否参与花费排行。
+func (m *Manager) SetLeaderboard(optIn bool) (json.RawMessage, error) {
+	apiURL, token, ok := m.userBearer()
+	if !ok {
+		return nil, errors.New("请先登录账号")
+	}
+	var out json.RawMessage
+	err := m.doJSON(http.MethodPost, apiURL+"/api/license/leaderboard", token, map[string]bool{"opt_in": optIn}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PoolStatus 查询号池账号状态。授权服务代拉数据，响应 JSON 原样返回。
+func (m *Manager) PoolStatus() (json.RawMessage, error) {
+	m.refreshIfNearExpiry()
+	apiURL, token, ok := m.bearer()
+	if !ok {
+		return nil, ErrNotActivated
+	}
+	const path = "/api/pool-status"
+	var out json.RawMessage
+	err := m.doJSON(http.MethodGet, apiURL+path, token, nil, &out)
+	var se *statusError
+	if errors.As(err, &se) && se.Status == http.StatusUnauthorized && m.refreshSerial() {
+		if apiURL, token, ok = m.bearer(); !ok {
+			return nil, ErrNotActivated
+		}
+		out = nil
+		err = m.doJSON(http.MethodGet, apiURL+path, token, nil, &out)
+	}
+	if errors.As(err, &se) && se.Status == http.StatusNotFound && (se.Detail == "" || se.Detail == "Not Found") {
+		return nil, ErrPoolUnsupported
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // statusError 是授权服务器返回的非 2xx 响应；Detail 为 FastAPI 的 detail 文本（可能为空）。
 type statusError struct {
 	Status int
@@ -565,7 +764,7 @@ func (m *Manager) doJSON(method, url, token string, body any, out any) error {
 		return fmt.Errorf("无法连接授权服务器：%w", err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode/100 != 2 {
 		se := &statusError{Status: resp.StatusCode}
 		var e struct {
@@ -669,9 +868,10 @@ func maskCode(code string) string {
 	return code[:4] + "****" + code[len(code)-4:]
 }
 
+// expText 效益包到期时间的日志写法，接在「效益包」后面。没开通过效益包（只有余额的钱包）时没有到期时间。
 func expText(t *time.Time) string {
 	if t == nil {
-		return "永久"
+		return "未开通"
 	}
-	return t.Local().Format("2006-01-02 15:04")
+	return "有效期至 " + t.Local().Format("2006-01-02 15:04")
 }

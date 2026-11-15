@@ -1,6 +1,65 @@
 package config
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+func TestValidModelOptionAcceptsDevinVariant(t *testing.T) {
+	SetSelectableModels([]Model{{
+		ID: "claude-opus-4-7", ReasoningEfforts: []string{"Low", "High"},
+		ContextOptions: []int{200000}, ContextWindow: 1000000,
+	}})
+	t.Cleanup(func() { SetSelectableModels(nil) })
+
+	got := ValidModelOption("claude-opus-4-7", ModelOption{Effort: "high", Context: 1000000})
+	if got.Effort != "High" || got.Context != 1000000 {
+		t.Fatalf("option: %+v", got)
+	}
+	if got := ValidModelOption("claude-opus-4-7", ModelOption{Effort: "max", Context: 999}); got != (ModelOption{}) {
+		t.Fatalf("unknown option kept: %+v", got)
+	}
+}
+
+func TestCatalogEpochBumpsOnlyWhenModelsChange(t *testing.T) {
+	SetSelectableModels(nil)
+	t.Cleanup(func() { SetSelectableModels(nil) })
+	start := CatalogEpoch()
+
+	SetSelectableModels([]Model{{ID: "claude-opus-4-7", Label: "Claude Opus 4.7"}})
+	if CatalogEpoch() != start+1 {
+		t.Fatalf("epoch after new model: %d, start %d", CatalogEpoch(), start)
+	}
+	SetSelectableModels([]Model{{ID: "claude-opus-4-7", Label: "Claude Opus 4.7"}})
+	if CatalogEpoch() != start+1 {
+		t.Fatalf("same catalog should keep epoch, got %d", CatalogEpoch())
+	}
+	SetSelectableModels([]Model{{ID: "mimo-v2.6-pro", Label: "MiMo V2.6 Pro"}})
+	if CatalogEpoch() != start+2 {
+		t.Fatalf("epoch after another model: %d, start %d", CatalogEpoch(), start)
+	}
+}
+
+func TestWaitCatalogChangeWakesWhenModelsChange(t *testing.T) {
+	SetSelectableModels(nil)
+	t.Cleanup(func() { SetSelectableModels(nil) })
+	seen := CatalogEpoch()
+	got := make(chan uint64, 1)
+	go func() {
+		got <- WaitCatalogChange(context.Background(), seen, true)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	SetSelectableModels([]Model{{ID: "mimo-v2.6-pro", Label: "MiMo V2.6 Pro"}})
+	select {
+	case epoch := <-got:
+		if epoch == seen || epoch != CatalogEpoch() {
+			t.Fatalf("woke with %d, seen %d, current %d", epoch, seen, CatalogEpoch())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("模型变化后没有叫醒等待方")
+	}
+}
 
 func TestModelInCatalog(t *testing.T) {
 	t.Cleanup(func() { SetSelectableModels(nil) })

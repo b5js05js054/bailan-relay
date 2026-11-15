@@ -43,8 +43,12 @@ func (c *Controller) accountResult(p account.Profile, err error, okMsg string) a
 func (c *Controller) onLogin() {
 	go func() {
 		c.clientBundle(true)
-		if c.license != nil && c.license.Valid() {
-			c.license.Refresh()
+		if c.license != nil {
+			if c.license.Valid() {
+				c.license.Refresh()
+			} else {
+				c.license.Restore()
+			}
 		}
 		c.refreshStatusData(false)
 	}()
@@ -76,6 +80,22 @@ func (c *Controller) apiUserRegister(args []any) any {
 		c.onLogin()
 	}
 	return c.accountResult(p, err, "注册成功")
+}
+
+// apiUserSetNickname 参数 [{name}]；昵称只保存在本机。
+func (c *Controller) apiUserSetNickname(args []any) any {
+	p, err := c.account.SetNickname(mapString(argMap(args, 0), "name"))
+	return c.accountResult(p, err, "昵称已更新")
+}
+
+// apiUserSetAvatar 参数 [{image: base64}]；头像保存在本机，顶栏和个人页立即使用。
+func (c *Controller) apiUserSetAvatar(args []any) any {
+	data, err := decodeImage(mapString(argMap(args, 0), "image"))
+	if err != nil {
+		return map[string]any{"ok": false, "message": "图片数据无效"}
+	}
+	p, err := c.account.SetAvatar(data)
+	return c.accountResult(p, err, "头像已更换")
 }
 
 // apiUserSetBackground 参数 [{image: base64}]；背景只保存在本地，不上传服务器。
@@ -115,6 +135,17 @@ func decodeImage(raw string) ([]byte, error) {
 		raw = raw[i+1:]
 	}
 	return base64.StdEncoding.DecodeString(raw)
+}
+
+// serveUserAvatar 输出当前账号的本地头像（GET /useravatar/）。
+func (c *Controller) serveUserAvatar(w http.ResponseWriter, r *http.Request) {
+	path, ok := c.account.AvatarFile()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeFile(w, r, path)
 }
 
 // serveUserBackground 输出当前账号的本地背景文件（GET /userbg/）；无背景返回 404。

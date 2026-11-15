@@ -14,11 +14,29 @@ import (
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
+
+	"golang.org/x/sys/windows/registry"
+
+	"bailan-relay/internal/config"
 )
 
 const createNoWindow = 0x08000000
 
+// perMonitorDpiAwareV2 对应 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2（Windows 10 1703+）。
+const perMonitorDpiAwareV2 = ^uintptr(3)
+
+// EnablePerMonitorDpiV2 在创建任何窗口前调用，避免 WebView2 被系统位图拉伸发糊。
+func EnablePerMonitorDpiV2() {
+	if procSetProcessDpiAwareness.Find() != nil {
+		return
+	}
+	_, _, _ = procSetProcessDpiAwareness.Call(perMonitorDpiAwareV2)
+}
+
 var (
+	user32                     = syscall.NewLazyDLL("user32.dll")
+	procSetProcessDpiAwareness = user32.NewProc("SetProcessDpiAwarenessContext")
+
 	shell32          = syscall.NewLazyDLL("shell32.dll")
 	procIsUserAdmin  = shell32.NewProc("IsUserAnAdmin")
 	procShellExecute = shell32.NewProc("ShellExecuteW")
@@ -91,9 +109,11 @@ func RunHidden(name string, args ...string) (string, int, error) {
 	return string(out), code, err
 }
 
-// FlushDNS 刷新系统 DNS 解析缓存。
+var procDnsFlushResolverCache = syscall.NewLazyDLL("dnsapi.dll").NewProc("DnsFlushResolverCache")
+
+// FlushDNS 刷新系统 DNS 解析缓存。直接调系统接口，避免弹出 ipconfig 窗口。
 func FlushDNS() {
-	_, _, _ = RunHidden("ipconfig", "/flushdns")
+	_, _, _ = procDnsFlushResolverCache.Call()
 }
 
 var (
@@ -220,4 +240,29 @@ func OpenExeDialog(current string) (string, error) {
 		return "", errors.New("未选择文件")
 	}
 	return syscall.UTF16ToString(buf), nil
+}
+
+// SetLaunchAtLogin 写入或删除当前用户的开机启动项。不需要管理员权限。
+func SetLaunchAtLogin(enabled bool) error {
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer key.Close()
+	name := config.AutostartValueName()
+	if !enabled {
+		if err := key.DeleteValue(name); err != nil && !errors.Is(err, registry.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return err
+	}
+	return key.SetStringValue(name, `"`+exe+`"`)
 }

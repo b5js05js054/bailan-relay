@@ -118,6 +118,32 @@ func extractModelName(payload []byte) string {
 	return ""
 }
 
+func protoString(payload []byte, num int) string {
+	for _, f := range parseFields(payload) {
+		if f.num == num && f.wt == 2 {
+			return fieldString(f.raw)
+		}
+	}
+	return ""
+}
+
+func fieldString(raw []byte) string {
+	offset := 0
+	_, offset, err := readVarint(raw, offset)
+	if err != nil {
+		return ""
+	}
+	length, offset, err := readVarint(raw, offset)
+	if err != nil {
+		return ""
+	}
+	end := offset + int(length)
+	if end > len(raw) {
+		return ""
+	}
+	return strings.TrimSpace(string(raw[offset:end]))
+}
+
 func replaceModelName(payload []byte, newModel string) []byte {
 	var parts [][]byte
 	replaced := false
@@ -138,6 +164,128 @@ func replaceModelName(payload []byte, newModel string) []byte {
 func isSWE16(modelName string) bool {
 	name := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(modelName)), ".", "-")
 	return name == "swe-1-6" || strings.HasPrefix(name, "swe-1-6-")
+}
+
+// IsSWE16 判断模型名是不是官方 SWE-1.6 系列。这类请求仍走 Hub 里保存的默认模型。
+func IsSWE16(modelName string) bool { return isSWE16(modelName) }
+
+// ReplaceChatModel 把请求里的模型名换成目录 ID。
+// 输入：可能带 Connect 帧的请求体、目录模型 ID、内容类型是否标明 Connect。输出：替换后的请求体；解析失败时原样返回。
+// Devin 选择器会把思考档和上下文编进模型名，中继只认目录里的基础 ID。
+// 有的请求体是 Connect 帧，但 Content-Type 只写 application/proto，这时也要按帧替换，不能把帧头当成 protobuf。
+func ReplaceChatModel(rawBody []byte, catalogID string, isConnect bool) []byte {
+	catalogID = strings.TrimSpace(catalogID)
+	if catalogID == "" {
+		return rawBody
+	}
+	if isConnect || looksLikeConnectFrame(rawBody) {
+		payload, isTrailer, compressed, leftover, err := decodeConnectFrame(rawBody)
+		if err == nil && !isTrailer && (isConnect || extractModelName(payload) != "") {
+			if extractModelName(payload) == catalogID {
+				return rawBody
+			}
+			encoded, err := encodeConnectFrame(replaceModelName(payload, catalogID), compressed, leftover)
+			if err != nil {
+				return rawBody
+			}
+			return encoded
+		}
+		if isConnect {
+			return rawBody
+		}
+	}
+	if extractModelName(rawBody) == catalogID {
+		return rawBody
+	}
+	return replaceModelName(rawBody, catalogID)
+}
+
+func looksLikeConnectFrame(raw []byte) bool {
+	if len(raw) < 5 || raw[0] > 0x03 {
+		return false
+	}
+	n := int(binary.BigEndian.Uint32(raw[1:5]))
+	return n >= 0 && 5+n <= len(raw)
+}
+
+// ChatModel 读取 GetChatMessage 请求里的模型名。
+// 输入：可能带 Connect 帧的 protobuf 请求体；输出：Field 21 的模型名，读不到时为空。
+func ChatModel(raw []byte) string {
+	if len(raw) >= 5 && raw[0] <= 0x03 {
+		payload, isTrailer, _, _, err := decodeConnectFrame(raw)
+		if err == nil && !isTrailer {
+			return extractModelName(payload)
+		}
+	}
+	return extractModelName(raw)
+}
+
+// MessagePayload 去掉 Connect 帧头。压缩帧会先解压，便于在正文里找会话名。
+func MessagePayload(raw []byte) []byte {
+	if len(raw) >= 5 && raw[0] <= 0x03 {
+		if decoded, isTrailer, _, _, err := decodeConnectFrame(raw); err == nil && !isTrailer && len(decoded) > 0 {
+			return decoded
+		}
+	}
+	return raw
+}
+
+// ChatSessionIDs 收集请求里可能用来区分会话的字符串，包含 cascade_id、session_id，以及嵌套字段里的短编号。
+func ChatSessionIDs(raw []byte) []string {
+	payload := MessagePayload(raw)
+	var ids []string
+	seen := map[string]bool{}
+	collectSessionIDs(payload, &ids, seen, 0)
+	return ids
+}
+
+func collectSessionIDs(payload []byte, ids *[]string, seen map[string]bool, depth int) {
+	if depth > 4 {
+		return
+	}
+	for _, f := range parseFields(payload) {
+		if f.wt != 2 {
+			continue
+		}
+		text := fieldString(f.raw)
+		if sessionHint(text) && !seen[text] {
+			seen[text] = true
+			*ids = append(*ids, text)
+		}
+		inner := fieldBytes(f.raw)
+		if len(inner) > 0 {
+			collectSessionIDs(inner, ids, seen, depth+1)
+		}
+	}
+}
+
+func fieldBytes(raw []byte) []byte {
+	offset := 0
+	_, offset, err := readVarint(raw, offset)
+	if err != nil {
+		return nil
+	}
+	length, offset, err := readVarint(raw, offset)
+	if err != nil {
+		return nil
+	}
+	end := offset + int(length)
+	if end > len(raw) {
+		return nil
+	}
+	return raw[offset:end]
+}
+
+func sessionHint(text string) bool {
+	if len(text) < 6 || len(text) > 160 {
+		return false
+	}
+	for _, r := range text {
+		if r < 32 || r > 126 {
+			return false
+		}
+	}
+	return strings.Contains(text, "/") || strings.Count(text, "-") >= 1
 }
 
 func decodeConnectFrame(raw []byte) (payload []byte, isTrailer, compressed bool, leftover []byte, err error) {

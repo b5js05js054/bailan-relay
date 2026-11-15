@@ -52,21 +52,26 @@ func (l *Logger) appendLine(text string) {
 	if clean == "" || IsNoisy(clean) {
 		return
 	}
-	if config.IsCustomer() {
-		clean = sanitizeForCustomer(clean)
-		if strings.TrimSpace(clean) == "" {
-			return
-		}
-	}
 	now := time.Now().Format("15:04:05")
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.writeFileLocked(now, clean)
+	stored := clean
+	if config.IsCustomer() {
+		stored = sanitizeForCustomer(clean)
+		if strings.TrimSpace(stored) == "" {
+			return
+		}
+	}
+	l.writeFileLocked(now, stored)
+	shown := screenLog(stored)
+	if strings.TrimSpace(shown) == "" {
+		return
+	}
 	l.records = append(l.records, Record{
 		ID:       l.nextID,
 		Time:     now,
-		Category: Classify(clean),
-		Text:     clean,
+		Category: Classify(shown),
+		Text:     shown,
 	})
 	l.nextID++
 	if len(l.records) > maxRecords {
@@ -141,55 +146,130 @@ func (l *Logger) Clear() map[string]any {
 	return map[string]any{"ok": true, "latest_id": l.nextID - 1, "buffer_count": 0}
 }
 
-// LoadHistory 读取最新日志文件的最后 500 行并替换内存缓冲。
-func (l *Logger) LoadHistory() map[string]any {
+func readLatestLogLines() ([]string, string, error) {
 	path := latestLogFile()
 	if path == "" {
-		return map[string]any{"ok": false, "message": "没有找到历史日志文件"}
+		return nil, "", os.ErrNotExist
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return map[string]any{"ok": false, "message": "读取日志失败：" + err.Error()}
+		return nil, path, err
 	}
 	defer f.Close()
 	var lines []string
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		lines = append(lines, strings.TrimRight(scanner.Text(), "\r\n"))
-	}
-	if len(lines) > 500 {
-		lines = lines[len(lines)-500:]
-	}
-	now := time.Now().Format("15:04:05")
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.records = nil
-	for _, line := range lines {
+		line := strings.TrimRight(scanner.Text(), "\r\n")
 		if line == "" || IsNoisy(line) {
 			continue
 		}
-		if config.IsCustomer() {
-			line = sanitizeForCustomer(line)
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
+		line = screenLog(line)
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
-		l.records = append(l.records, Record{
-			ID:       l.nextID,
-			Time:     now,
-			Category: Classify(line),
-			Text:     line,
-		})
-		l.nextID++
+		lines = append(lines, line)
 	}
-	entries := append([]Record{}, l.records...)
+	if err := scanner.Err(); err != nil {
+		return nil, path, err
+	}
+	return lines, path, nil
+}
+
+func parseStoredLogLine(line string) (timeStr, text string) {
+	if idx := strings.Index(line, " | "); idx >= 0 {
+		return strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+3:])
+	}
+	return time.Now().Format("15:04:05"), line
+}
+
+func recordsFromLogLines(lines []string, idStart int) ([]Record, int) {
+	next := idStart
+	if next < 1 {
+		next = 1
+	}
+	out := make([]Record, 0, len(lines))
+	for _, line := range lines {
+		when, text := parseStoredLogLine(line)
+		out = append(out, Record{
+			ID:       next,
+			Time:     when,
+			Category: Classify(text),
+			Text:     text,
+		})
+		next++
+	}
+	return out, next
+}
+
+// LoadHistory 读取最新日志文件的最后 500 行并替换内存缓冲。
+func (l *Logger) LoadHistory() map[string]any {
+	lines, _, err := readLatestLogLines()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{"ok": false, "message": "没有找到历史日志文件"}
+		}
+		return map[string]any{"ok": false, "message": "读取日志失败：" + err.Error()}
+	}
+	total := len(lines)
+	hasMore := total > 500
+	if len(lines) > 500 {
+		lines = lines[len(lines)-500:]
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.records = nil
+	entries, nextID := recordsFromLogLines(lines, l.nextID)
+	l.records = entries
+	l.nextID = nextID
+	out := append([]Record{}, l.records...)
 	return map[string]any{
-		"ok":           true,
-		"message":      "已加载 " + itoa(len(entries)) + " 条历史日志",
-		"entries":      entries,
-		"latest_id":    l.nextID - 1,
-		"buffer_count": len(entries),
+		"ok":                true,
+		"message":           "已加载 " + itoa(len(out)) + " 条历史日志",
+		"entries":           out,
+		"latest_id":         l.nextID - 1,
+		"buffer_count":      len(out),
+		"has_more":          hasMore,
+		"file_lines_loaded": len(out),
+	}
+}
+
+// ReadFileChunk 从最新日志文件按「距文件末尾 skip 行」起向前读取 limit 行（不改动内存缓冲）。
+func (l *Logger) ReadFileChunk(skipFromEnd, limit int) map[string]any {
+	if skipFromEnd < 0 {
+		skipFromEnd = 0
+	}
+	if limit < 1 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	lines, _, err := readLatestLogLines()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{"ok": true, "entries": []Record{}, "has_more": false, "count": 0}
+		}
+		return map[string]any{"ok": false, "message": "读取日志失败：" + err.Error()}
+	}
+	end := len(lines) - skipFromEnd
+	if end <= 0 {
+		return map[string]any{"ok": true, "entries": []Record{}, "has_more": false, "count": 0}
+	}
+	start := end - limit
+	if start < 0 {
+		start = 0
+	}
+	chunk := lines[start:end]
+	entries, _ := recordsFromLogLines(chunk, 0)
+	for i := range entries {
+		entries[i].ID = 0
+	}
+	return map[string]any{
+		"ok":       true,
+		"entries":  entries,
+		"has_more": start > 0,
+		"count":    len(entries),
 	}
 }
 
@@ -265,6 +345,7 @@ func custInit() {
 	custDrops = []string{
 		"目标域名", "拦截方式", "[PASSTHROUGH", "[passthrough",
 		"[DNS]", "[放行]", "[BLOCKED]", "监听",
+		"请求里的会话编号", "会话编号对不上",
 	}
 	d := config.Default()
 	add := func(from, to string) {
@@ -300,6 +381,103 @@ func sanitizeForCustomer(line string) string {
 		out = strings.ReplaceAll(out, p[0], p[1])
 	}
 	return out
+}
+
+// screenLog 决定界面上给客户看的那一行。完整内容仍写入本机日志文件。
+// 读历史文件时行首带「时间 | 」，只改正文，时间前缀留给解析。
+func screenLog(line string) string {
+	head, body := splitStoredLog(line)
+	body = screenLogBody(body)
+	if strings.TrimSpace(body) == "" {
+		return ""
+	}
+	if head == "" {
+		return body
+	}
+	return head + " | " + body
+}
+
+func splitStoredLog(line string) (head, body string) {
+	idx := strings.Index(line, " | ")
+	if idx < 0 || idx > 12 {
+		return "", line
+	}
+	return strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+3:])
+}
+
+func screenLogBody(line string) string {
+	line = sanitizeForCustomer(line)
+	if strings.TrimSpace(line) == "" {
+		return ""
+	}
+	for _, t := range []string{
+		"已把你的模型写进", "已接上模型变化", "已在模型名字旁边", "已还原 Agent",
+		"隧道网卡", "已写入 hosts", "绕过 TUN", "Devin.exe", "模型目录",
+		"[账单流量]", "[账单改写]",
+	} {
+		if strings.Contains(line, t) {
+			return ""
+		}
+	}
+	if friendly, ok := friendlyScreenLine(line); ok {
+		return strings.TrimSpace(friendly)
+	}
+	for _, t := range []string{
+		"控制台地址", "组件已就绪", "根证书", "hosts", "使用模型",
+		"Go 原生", "无中间人", "代理绕过", "系统代理", "控制服务",
+		"模型选项", "指定模型",
+	} {
+		if strings.Contains(line, t) {
+			return ""
+		}
+	}
+	return line
+}
+
+// friendlyScreenLine 把调试行收成一句人话。第二个返回值表示这行已经处理过。
+func friendlyScreenLine(line string) (string, bool) {
+	switch {
+	case strings.HasPrefix(line, "[会话等待]"):
+		return "正在发送：" + modelFromLog(line), true
+	case strings.HasPrefix(line, "[会话完成]"):
+		return "对话已完成：" + modelFromLog(line), true
+	case strings.HasPrefix(line, "[会话响应头异常]"), strings.HasPrefix(line, "[会话转发失败]"):
+		return "对话发送失败：" + modelFromLog(line), true
+	case strings.HasPrefix(line, "[会话响应头]"):
+		return "", true
+	case strings.HasPrefix(line, "[会话取消]"):
+		return "对话已取消：" + modelFromLog(line), true
+	case strings.HasPrefix(line, "[会话流中断]"):
+		return "对话中断：" + modelFromLog(line), true
+	case strings.Contains(line, "正在停止拦截"):
+		return "正在停止拦截并关闭 Devin", true
+	case strings.Contains(line, "拦截已停止"):
+		return "拦截已停止，Devin 已关闭", true
+	case strings.Contains(line, "正在启动本地代理"):
+		return "正在启动拦截", true
+	case strings.Contains(line, "[拦截成功]"):
+		if strings.Contains(line, "已自动重启") {
+			return "拦截已开启，Devin 已重启", true
+		}
+		return "拦截已开启", true
+	case strings.Contains(line, "Devin 已关闭"):
+		return "Devin 已关闭", true
+	default:
+		return "", false
+	}
+}
+
+func modelFromLog(line string) string {
+	const key = "模型："
+	i := strings.Index(line, key)
+	if i < 0 {
+		return ""
+	}
+	rest := line[i+len(key):]
+	if j := strings.Index(rest, " ·"); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.TrimSpace(rest)
 }
 
 // Classify 给日志行分类：error/blocked/success/relay/passthrough/normal。

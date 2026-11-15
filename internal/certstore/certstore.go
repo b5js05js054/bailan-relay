@@ -1,5 +1,5 @@
 // Package certstore 负责本地根 CA 的生成/加载、按 SNI 动态签发叶子证书，
-// 以及安装/卸载到系统根证书存储（Windows: certutil；macOS: security 钥匙串）。
+// 以及安装/卸载到系统根证书存储（Windows: 系统证书库；macOS: security 钥匙串）。
 // 取代旧版对 mitmproxy CA 的依赖。
 package certstore
 

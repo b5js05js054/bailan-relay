@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"bailan-relay/internal/certstore"
 	"bailan-relay/internal/config"
 	"bailan-relay/internal/devin"
+	"bailan-relay/internal/devincatalog"
 	"bailan-relay/internal/hostsfile"
 	"bailan-relay/internal/license"
 	"bailan-relay/internal/proxybypass"
@@ -21,26 +25,61 @@ import (
 func (c *Controller) apiGetBootstrap([]any) any {
 	bundle := c.clientBundle(false)
 	return map[string]any{
-		"app_title":      config.AppTitle,
-		"ui_version":     config.UIVersion,
-		"app_version":    config.AppVersion,
-		"edition":        config.Edition,
-		"platform":       runtime.GOOS,
-		"admin":          sysutil.IsAdmin(),
-		"config_path":    config.ConfigPath(),
-		"cert_path":      certstore.CertPath(),
-		"models":         bundle.models,
-		"catalog_synced": config.CatalogSynced(),
-		"announcement":   bundle.announcement,
-		"update":         buildUpdateView(bundle.update),
-		"config":         c.publicConfig(config.Load()),
-		"status":         c.statusSnapshot(),
-		"license":        c.licenseStatus(),
-		"account":        accountView(c.account.Session()),
+		"app_title":        config.AppTitle,
+		"ui_version":       config.UIVersion,
+		"app_version":      config.AppVersion,
+		"edition":          config.Edition,
+		"platform":         runtime.GOOS,
+		"admin":            sysutil.IsAdmin(),
+		"config_path":      config.ConfigPath(),
+		"cert_path":        certstore.CertPath(),
+		"models":           bundle.models,
+		"catalog_synced":   config.CatalogSynced(),
+		"announcement":     bundle.announcement,
+		"update":           buildUpdateView(bundle.update),
+		"config":           c.publicConfig(config.Load()),
+		"status":           c.statusSnapshot(),
+		"license":          c.licenseStatus(),
+		"account":          accountView(c.account.Session()),
+		"ui_scale_percent": config.LoadUIScalePercent(),
 	}
 }
 
-// apiActivateLicense 用卡密激活当前设备。
+// apiShopInfo 查询商城：在售的效益包与本机钱包。后台响应放在 data 中原样透传。
+// 失败时 reason 区分 unsupported / error。
+func (c *Controller) apiShopInfo([]any) any {
+	if c.license == nil {
+		return map[string]any{"ok": false, "reason": "error", "message": "授权模块未初始化"}
+	}
+	data, err := c.license.Shop()
+	if err != nil {
+		reason := "error"
+		if errors.Is(err, license.ErrShopUnsupported) {
+			reason = "unsupported"
+		}
+		return map[string]any{"ok": false, "reason": reason, "message": err.Error()}
+	}
+	return map[string]any{"ok": true, "data": data}
+}
+
+// apiShopBuy 参数 [product_id]。用本机钱包的余额购买效益包。
+func (c *Controller) apiShopBuy(args []any) any {
+	if c.license == nil {
+		return map[string]any{"ok": false, "message": "授权模块未初始化"}
+	}
+	ok, msg := c.license.BuyPack(argInt(args, 0, 0))
+	tone := "success"
+	if !ok {
+		tone = "error"
+	}
+	c.setNotice(msg, tone, nil, false)
+	if ok {
+		go c.refreshStatusData(false)
+	}
+	return map[string]any{"ok": ok, "message": msg, "license": c.licenseStatus()}
+}
+
+// apiActivateLicense 用卡密开通效益包：本机没有钱包时卡密成为钱包，已有钱包时并入钱包。
 func (c *Controller) apiActivateLicense(args []any) any {
 	if c.license == nil {
 		return map[string]any{"ok": false, "message": "授权模块未初始化"}
@@ -61,7 +100,7 @@ func (c *Controller) apiLicenseStatus([]any) any {
 	return map[string]any{"ok": true, "license": c.licenseStatus()}
 }
 
-// apiRedeemTopup 用充值码给当前卡密充值余额（高级模型按倍率从余额扣费）。
+// apiRedeemTopup 用充值码给本机钱包充值余额（高级模型按倍率从余额扣费，也可在商城购买效益包）。
 func (c *Controller) apiRedeemTopup(args []any) any {
 	if c.license == nil {
 		return map[string]any{"ok": false, "message": "授权模块未初始化"}
@@ -95,6 +134,49 @@ func (c *Controller) apiGetUsage(args []any) any {
 	return map[string]any{"ok": true, "data": data}
 }
 
+// apiGetLeaderboard 参数 [range, dimension, page]。账号令牌查询用量排行。
+func (c *Controller) apiGetLeaderboard(args []any) any {
+	if c.license == nil {
+		return map[string]any{"ok": false, "message": "授权模块未初始化"}
+	}
+	data, err := c.license.Leaderboard(argString(args, 0), argString(args, 1), argString(args, 2), argInt(args, 3, 1))
+	if err != nil {
+		return map[string]any{"ok": false, "message": err.Error()}
+	}
+	return map[string]any{"ok": true, "data": data}
+}
+
+// apiSetLeaderboard 参数 [optIn]。当前账号是否参与排行。
+func (c *Controller) apiSetLeaderboard(args []any) any {
+	if c.license == nil {
+		return map[string]any{"ok": false, "message": "授权模块未初始化"}
+	}
+	data, err := c.license.SetLeaderboard(argBool(args, 0, false))
+	if err != nil {
+		return map[string]any{"ok": false, "message": err.Error()}
+	}
+	return map[string]any{"ok": true, "data": data}
+}
+
+// apiGetPoolStatus 查询号池状态。授权服务返回的 JSON 放在 data 中原样透传。
+func (c *Controller) apiGetPoolStatus([]any) any {
+	if c.license == nil {
+		return map[string]any{"ok": false, "reason": "error", "message": "授权模块未初始化"}
+	}
+	data, err := c.license.PoolStatus()
+	if err != nil {
+		reason := "error"
+		switch {
+		case errors.Is(err, license.ErrNotActivated):
+			reason = "not_activated"
+		case errors.Is(err, license.ErrPoolUnsupported):
+			reason = "unsupported"
+		}
+		return map[string]any{"ok": false, "reason": reason, "message": err.Error()}
+	}
+	return map[string]any{"ok": true, "data": data}
+}
+
 // apiDeactivateLicense 清除本地授权。
 func (c *Controller) apiDeactivateLicense([]any) any {
 	if c.license == nil {
@@ -107,6 +189,28 @@ func (c *Controller) apiDeactivateLicense([]any) any {
 }
 
 func (c *Controller) apiGetStatus([]any) any { return c.statusSnapshot() }
+
+// apiCatalogEpoch 返回当前模型目录版本。
+func (c *Controller) apiCatalogEpoch([]any) any {
+	return map[string]any{"ok": true, "epoch": config.CatalogEpoch()}
+}
+
+// serveCatalogWait 把这条连接留住。后台模型一变就写回新版本，让 Devin 去向官方要列表。
+func (c *Controller) serveCatalogWait(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	var args []any
+	if body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)); err == nil && len(body) > 0 {
+		_ = json.Unmarshal(body, &args)
+	}
+	seen, hasSeen := uint64(0), false
+	if len(args) > 0 {
+		if value, ok := args[0].(float64); ok && value >= 0 {
+			seen, hasSeen = uint64(value), true
+		}
+	}
+	epoch := config.WaitCatalogChange(r.Context(), seen, hasSeen)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "epoch": epoch})
+}
 
 // apiClientConfig 返回后台发布的客户端配置（模型目录 + 公告 + 更新），供界面周期刷新。
 // 界面每 15s 轮询一次，这里强制拉新以保证近实时；失败自动回退缓存（clientBundle 内处理）。
@@ -132,6 +236,12 @@ func (c *Controller) apiGetLogs(args []any) any {
 func (c *Controller) apiClearLogBuffer([]any) any { return c.log.Clear() }
 
 func (c *Controller) apiLoadLogHistory([]any) any { return c.log.LoadHistory() }
+
+func (c *Controller) apiLoadLogChunk(args []any) any {
+	skip := argInt(args, 0, 0)
+	limit := argInt(args, 1, 200)
+	return c.log.ReadFileChunk(skip, limit)
+}
 
 func (c *Controller) apiSetModel(args []any) any {
 	normalized := config.NormalizeModelID(argString(args, 0))
@@ -164,23 +274,81 @@ func (c *Controller) apiSetModelOption(args []any) any {
 	return map[string]any{"ok": true, "message": "已保存模型选项", "config": c.publicConfig(cfg)}
 }
 
+func (c *Controller) apiSetSessionModel(args []any) any {
+	sessionID := strings.TrimSpace(argString(args, 0))
+	raw := strings.TrimSpace(argString(args, 1))
+	choice, ok := devincatalog.SelectedRelayChoice(raw)
+	if sessionID == "" || !ok {
+		return map[string]any{"ok": false, "message": "会话或模型无效"}
+	}
+	c.proxy.RememberSessionModel(sessionID, choice.Model, choice.Effort, choice.Context)
+	c.proxy.SetModel(choice.Model)
+	opt := config.ValidModelOption(choice.Model, config.ModelOption{Effort: choice.Effort, Context: choice.Context})
+	c.proxy.SetModelOption(choice.Model, opt)
+	cfg := config.Save(func(x *config.Config) {
+		x.OverrideModel = choice.Model
+		if x.ModelOptions == nil {
+			x.ModelOptions = map[string]config.ModelOption{}
+		}
+		if opt == (config.ModelOption{}) {
+			delete(x.ModelOptions, choice.Model)
+		} else {
+			x.ModelOptions[choice.Model] = opt
+		}
+	})
+	c.log.Log(fmt.Sprintf("[Manager] 会话 %s 使用模型: %s (%s)", sessionID, config.ModelLabel(choice.Model), choice.Model))
+	return map[string]any{"ok": true, "config": c.publicConfig(cfg)}
+}
+
 func (c *Controller) apiSetOption(args []any) any {
 	name := argString(args, 0)
 	if name == "show_mitmweb" {
 		cfg := config.Save(func(x *config.Config) { x.ShowMitmweb = false })
 		return map[string]any{"ok": true, "config": c.publicConfig(cfg)}
 	}
-	if name != "restart_devin_on_start" {
+	enabled := argBool(args, 1, false)
+	switch name {
+	case "restart_devin_on_start":
+		cfg := config.Save(func(x *config.Config) { x.RestartDevinOnStart = enabled })
+		state := "关闭"
+		if enabled {
+			state = "开启"
+		}
+		c.log.Log("[Manager] 启动后重启 Devin：" + state)
+		return map[string]any{"ok": true, "config": c.publicConfig(cfg)}
+	case "close_to_tray":
+		cfg := config.Save(func(x *config.Config) { x.CloseToTray = enabled })
+		if enabled {
+			c.log.Log("[Manager] 关闭窗口时最小化到托盘")
+		} else {
+			c.log.Log("[Manager] 关闭窗口时直接退出")
+		}
+		return map[string]any{"ok": true, "config": c.publicConfig(cfg)}
+	case "block_devin_update":
+		if err := devin.SetUpdateBlocked(enabled); err != nil {
+			return map[string]any{"ok": false, "message": "没能改 Devin 的更新设置"}
+		}
+		cfg := config.Save(func(x *config.Config) { x.BlockDevinUpdate = enabled })
+		if enabled {
+			c.log.Log("[Manager] 已关闭 Devin 更新")
+		} else {
+			c.log.Log("[Manager] 已允许 Devin 更新")
+		}
+		return map[string]any{"ok": true, "config": c.publicConfig(cfg)}
+	case "launch_at_login":
+		if err := sysutil.SetLaunchAtLogin(enabled); err != nil {
+			return map[string]any{"ok": false, "message": "没能写入开机启动项"}
+		}
+		cfg := config.Save(func(x *config.Config) { x.LaunchAtLogin = enabled })
+		if enabled {
+			c.log.Log("[Manager] 已设置开机自启")
+		} else {
+			c.log.Log("[Manager] 已取消开机自启")
+		}
+		return map[string]any{"ok": true, "config": c.publicConfig(cfg)}
+	default:
 		return map[string]any{"ok": false, "message": "不支持的启动选项"}
 	}
-	enabled := argBool(args, 1, false)
-	cfg := config.Save(func(x *config.Config) { x.RestartDevinOnStart = enabled })
-	state := "关闭"
-	if enabled {
-		state = "开启"
-	}
-	c.log.Log("[Manager] 启动后重启 Devin：" + state)
-	return map[string]any{"ok": true, "config": c.publicConfig(cfg)}
 }
 
 func (c *Controller) apiSaveConfig(args []any) any {
@@ -392,14 +560,7 @@ func (c *Controller) apiStartProxy([]any) any {
 		c.setNotice(msg, "error", nil, false)
 		return map[string]any{"ok": false, "message": msg, "need_login": true}
 	}
-	// 卡密授权闸门：未激活或已失效则拒绝启动。
-	if c.license != nil {
-		if ok, msg := c.license.EnsureFresh(); !ok {
-			notice := "请先激活卡密：" + msg
-			c.setNotice(notice, "error", nil, false)
-			return map[string]any{"ok": false, "message": notice, "need_license": true, "license": c.licenseStatus()}
-		}
-	}
+	// 启动拦截不要求先开通效益包或充值：没有钱包时对话请求会在转发处被拦下并提示去商城。
 	c.setProxyState("starting", "正在启动本地代理", boolPtr(false))
 	c.log.Log("[Manager] 正在启动本地代理…")
 	go c.startProxyTask()
@@ -469,16 +630,22 @@ func (c *Controller) startProxyTask() {
 		restarted = true
 		c.log.Log("[拦截成功] hosts 劫持已开启，Devin 已自动重启")
 	} else {
+		_, msg := devin.ApplyClientPatches(cfg.DevinExecutable)
+		if msg != "" {
+			c.log.Log("[Manager] " + msg + "。Devin 这次没有重启，下次打开才会用上")
+		}
 		c.log.Log("[拦截成功] hosts 劫持已开启（未重启 Devin）")
 	}
+
+	// 记下这次对 Devin 的适配结果，界面「适配状态」据此显示哪项生效、哪项需重新适配。
+	c.setAdaptation(devin.LastPatchReport())
 
 	restartNote := "未重启 Devin"
 	if restarted {
 		restartNote = "Devin 已自动重启"
 	}
 	c.setProxyState("running", "拦截已开启，"+restartNote, boolPtr(true))
-	action := "log"
-	c.setNotice("拦截已开启 · "+restartNote+" · 正在显示实时日志", "success", &action, true)
+	c.setNotice("拦截已开启 · "+restartNote, "success", nil, false)
 }
 
 func (c *Controller) failStart(reason string) {
@@ -508,6 +675,9 @@ func (c *Controller) stopProxyTask() {
 
 	devinClosed, devinMessage := devin.Stop(config.Load().DevinExecutable)
 	c.log.Log("[Manager] " + devinMessage)
+	if _, msg := devin.RestoreClientPatches(config.Load().DevinExecutable); msg != "" {
+		c.log.Log("[Manager] " + msg)
+	}
 	c.proxy.Stop()
 	ok, hostsMsg := hostsfile.Restore()
 	if _, err := proxybypass.Restore(config.Load().HijackDomains()); err != nil {

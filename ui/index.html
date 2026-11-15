@@ -2,16 +2,17 @@
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8">
+    <!-- 进程已是 Per-Monitor DPI V2，用设备宽度且不额外缩放，才是 1:1 清晰 -->
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>白岚 Devin 中继</title>
+    <title>DevinHub</title>
     <script>
         try {
             // 默认深色；仅当用户显式切到日间才使用浅色。
             document.documentElement.dataset.theme = localStorage.getItem("bailan.ui.theme") === "day" ? "day" : "night";
         } catch { document.documentElement.dataset.theme = "night"; }
     </script>
-    <link rel="stylesheet" href="app.css">
+    <link rel="stylesheet" href="app.css?v=99">
     <link rel="icon" href="favicon.ico" sizes="any">
 </head>
 <body>
@@ -19,6 +20,7 @@
         <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.2 15.5A8.5 8.5 0 0 1 8.5 3.8 8.8 8.8 0 1 0 20.2 15.5Z"/></symbol>
         <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></symbol>
         <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+        <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
         <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l2.4-7 4.3 14 2.5-7H21"/></symbol>
         <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M5 3v18M12 3v18M19 3v18"/><path d="M2.5 8h5M9.5 15h5M16.5 7h5"/><circle cx="5" cy="8" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="7" r="2"/></symbol>
         <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v5.6c0 4.8-3.3 7.8-8 9.4-4.7-1.6-8-4.6-8-9.4V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></symbol>
@@ -41,6 +43,7 @@
         <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.1M7 17h.1M11 7h7M11 17h7"/></symbol>
         <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v4a2 2 0 0 0 2 2h8a2 2 0 0 1 2 2v2"/><path d="M14 5h4v4"/></symbol>
         <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l2 2M14 9l2 2"/></symbol>
+        <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></symbol>
         <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
         <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
         <symbol id="i-certificate" viewBox="0 0 24 24"><circle cx="12" cy="10" r="6"/><path d="m8.5 15-1 6 4.5-2 4.5 2-1-6"/><path d="m9.5 10 1.6 1.6 3.4-3.4"/></symbol>
@@ -54,70 +57,103 @@
         <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M10 17l-5-5 5-5M5 12h11"/></symbol>
         <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
         <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 15 4-4.5 3 3L20 7"/><path d="M16 7h4v4"/></symbol>
+        <symbol id="i-signout" viewBox="0 0 24 24"><path d="M10 7V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-2"/><path d="M15 12H4m0 0 3-3M4 12l3 3"/></symbol>
+        <symbol id="i-apps" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></symbol>
+        <symbol id="i-pool" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 3C7.58 3 4 4.79 4 7s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zM4 9v3c0 2.21 3.58 4 8 4s8-1.79 8-4V9c0 2.21-3.58 4-8 4s-8-1.79-8-4zm0 5v3c0 2.21 3.58 4 8 4s8-1.79 8-4v-3c0 2.21-3.58 4-8 4s-8-1.79-8-4z"/></symbol>
+        <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 1 1 18 0Z"/></symbol>
+        <symbol id="i-restore" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.4-6"/><path d="M3.5 4.5V9H8"/></symbol>
+        <symbol id="i-bag" viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6L5 8Z"/><path d="M9 8V7a3 3 0 0 1 6 0v1"/></symbol>
+        <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M18 8V6a1 1 0 0 0-1-1H6a2 2 0 0 0 0 4h13a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2V7"/><path d="M16 14h.1"/></symbol>
     </svg>
 
-    <div class="app-shell" id="appShell">
+    <div class="app-scroll-frame" id="appScrollFrame">
+    <div class="app-shell is-top" id="appShell">
+        <div class="topbar-pin">
         <header class="topbar">
-            <div class="brand">
-                <div class="brand-mark" id="brandMark" aria-hidden="true">
-                    <svg viewBox="0 0 36 36"><path d="M4 27 13 14l5 6 4-4 10 11"/><path d="M9 9.5h4M22 8h6"/></svg>
-                </div>
-                <div class="brand-copy">
-                    <strong>白岚</strong>
-                    <span>Devin 中继</span>
-                </div>
+            <div class="brand" id="brandChip">
+                <button class="brand-mark" id="brandMark" type="button" title="个人主页" aria-label="个人主页">
+                    <svg viewBox="0 0 36 36"><path d="M18 5 29.3 11.5v13L18 31 6.7 24.5v-13z"/></svg>
+                </button>
+                <button class="brand-name" id="navUserName" type="button">DevinHub</button>
             </div>
 
+            <span class="nav-divider" aria-hidden="true"></span>
+
             <nav class="navigation" aria-label="主导航">
-                <button class="nav-item active" type="button" data-route="home" title="工作台 (Ctrl+1)">
+                <span class="nav-indicator" id="navIndicator" aria-hidden="true"></span>
+                <button class="nav-item active" type="button" data-route="home" title="开始 (Ctrl+1)">
                     <span class="nav-icon"><svg><use href="#i-grid"/></svg></span>
-                    <span class="nav-copy"><strong>工作台</strong></span>
+                    <span class="nav-copy"><strong>开始</strong></span>
                 </button>
-                <button class="nav-item" type="button" data-route="usage" title="用量 (Ctrl+2)">
+                <button class="nav-item" type="button" data-route="models" title="模型 (Ctrl+2)">
+                    <span class="nav-icon"><svg><use href="#i-route"/></svg></span>
+                    <span class="nav-copy"><strong>模型</strong></span>
+                </button>
+                <button class="nav-item" type="button" data-route="shop" title="商城 (Ctrl+7)">
+                    <span class="nav-icon"><svg><use href="#i-bag"/></svg></span>
+                    <span class="nav-copy"><strong>商城</strong></span>
+                </button>
+                <button class="nav-item" type="button" data-route="usage" title="用量 (Ctrl+3)">
                     <span class="nav-icon"><svg><use href="#i-chart"/></svg></span>
                     <span class="nav-copy"><strong>用量</strong></span>
                 </button>
-                <button class="nav-item" type="button" data-route="log" title="实时日志 (Ctrl+3)">
-                    <span class="nav-icon"><svg><use href="#i-activity"/></svg></span>
-                    <span class="nav-copy"><strong>实时日志</strong></span>
-                    <span class="nav-live" id="navLive" hidden></span>
+                <button class="nav-item" type="button" data-route="pool" title="CC号池状态 (Ctrl+6)">
+                    <span class="nav-icon"><svg class="pool-icon-base"><use href="#i-pool"/></svg><svg class="pool-icon-fill"><use href="#i-pool"/></svg></span>
+                    <span class="nav-copy"><strong>号池</strong></span>
                 </button>
-                <button class="nav-item" type="button" data-route="config" title="连接配置 (Ctrl+4)">
+                <button class="nav-item" type="button" data-route="log" data-hb="idle" title="监控 (Ctrl+4)">
+                    <span class="nav-icon"><svg><use href="#i-pulse"/></svg></span>
+                    <span class="nav-copy"><strong>监控</strong></span>
+                </button>
+                <button class="nav-item" type="button" data-route="config" title="设置 (Ctrl+5)">
                     <span class="nav-icon"><svg><use href="#i-sliders"/></svg></span>
-                    <span class="nav-copy"><strong>连接配置</strong></span>
-                </button>
-                <button class="nav-item" type="button" data-route="cert" title="证书管理 (Ctrl+5)">
-                    <span class="nav-icon"><svg><use href="#i-shield"/></svg></span>
-                    <span class="nav-copy"><strong>证书管理</strong></span>
+                    <span class="nav-copy"><strong>设置</strong></span>
                 </button>
             </nav>
 
+            <span class="nav-divider" aria-hidden="true"></span>
+
             <div class="topbar-tools">
                 <div class="license-chip-wrap">
-                    <button class="license-chip" id="licenseChip" type="button" aria-haspopup="true" aria-expanded="false" title="卡密授权：点击查看详情 / 充值" hidden>
-                        <svg aria-hidden="true"><use href="#i-key"/></svg>
-                        <span id="licenseChipDays">已授权</span>
-                        <strong id="licenseChipBalance" hidden></strong>
+                    <button class="license-chip" id="licenseChip" type="button" data-tone="ok" aria-haspopup="true" aria-expanded="false" title="我的钱包：点击查看效益包和余额" hidden>
+                        <svg aria-hidden="true"><use href="#i-wallet"/></svg>
+                        <span class="license-chip-copy">
+                            <span id="licenseChipDays">效益包</span>
+                            <strong id="licenseChipBalance" hidden></strong>
+                        </span>
+                        <span class="license-chip-topup" id="licenseChipTopup" hidden>充值</span>
                     </button>
                     <div class="license-pop" id="licensePop" hidden>
                         <div class="license-pop-head">
-                            <strong>卡密授权</strong>
-                            <span class="badge success">已授权</span>
+                            <strong>我的钱包</strong>
+                            <span class="badge success" id="licensePackBadge">效益包有效</span>
                         </div>
-                        <div class="license-meta" id="licenseMeta" hidden>
-                            <span id="licenseCode">—</span>
-                            <span id="licenseExpiry">—</span>
-                            <span id="licenseBalance" hidden title="高级模型按倍率从余额扣费；免费模型不消耗余额">余额 —</span>
-                            <button class="inline-action" id="changeLicenseBtn" type="button">更换卡密</button>
+                        <div class="license-facts" id="licenseMeta" hidden>
+                            <div class="license-fact">
+                                <span>效益包</span>
+                                <b id="licenseExpiry" title="效益包有效期内可使用免费模型">—</b>
+                            </div>
+                            <div class="license-fact" id="licenseBalanceRow" hidden>
+                                <span>余额</span>
+                                <strong id="licenseBalance" title="高级模型按倍率从余额扣费，也可以在商城购买效益包；免费模型不消耗余额">—</strong>
+                            </div>
+                            <div class="license-fact">
+                                <span>卡密</span>
+                                <b id="licenseCode">—</b>
+                            </div>
+                        </div>
+                        <div class="license-pop-actions">
+                            <button class="button ghost compact" id="changeLicenseBtn" type="button">清除卡密</button>
+                            <button class="button compact" id="openShopBtn" type="button">去商城</button>
                         </div>
                         <div class="license-form license-redeem" id="licenseRedeem" hidden>
-                            <input class="text-input" id="redeemInput" type="text" placeholder="充值码（TP-XXXX…）" autocomplete="off" spellcheck="false" />
-                            <button class="button control-primary" id="redeemBtn" type="button"><span>充值</span></button>
+                            <input class="text-input" id="redeemInput" type="text" placeholder="卡密或充值码" autocomplete="off" spellcheck="false" />
+                            <button class="button primary compact" id="redeemBtn" type="button"><span>兑换</span></button>
                         </div>
                     </div>
                 </div>
 
-                <button class="hb-mini" id="hbMini" type="button" data-state="idle" title="网络心跳：点击查看详情" aria-label="网络心跳">
+                <button class="hb-mini" id="hbMini" type="button" data-state="idle" title="网络心跳：点击查看详情" aria-label="网络心跳" hidden>
                     <svg class="hb-mini-icon" aria-hidden="true"><use href="#i-pulse"/></svg>
                     <span>延迟</span>
                     <strong id="hbMiniValue">--</strong>
@@ -127,69 +163,6 @@
                     <span class="theme-toggle-icon" aria-hidden="true"><svg><use href="#i-sun"/></svg></span>
                     <span class="theme-toggle-copy">夜间模式<small id="themeToggleState">已开启</small></span>
                 </button>
-
-                <div class="user-menu-wrap">
-                    <button class="user-chip" id="userMenuBtn" type="button" aria-haspopup="true" aria-expanded="false">
-                        <span class="avatar" id="userChipAvatar" aria-hidden="true"></span>
-                        <span class="user-chip-email" id="userChipEmail">未登录</span>
-                        <svg class="user-chip-caret" aria-hidden="true"><use href="#i-chevron"/></svg>
-                    </button>
-                    <div class="user-menu" id="userMenu" hidden>
-                        <div class="account-card">
-                            <span class="avatar avatar-lg" id="userMenuAvatar" aria-hidden="true"></span>
-                            <div class="account-copy">
-                                <strong id="userMenuEmail">未登录</strong>
-                                <small class="operator-line"><span class="operator-dot" id="operatorDot"></span><span id="operatorRole">正在确认权限</span></small>
-                            </div>
-                        </div>
-                        <div class="promo-card">
-                            <button class="promo-item" id="changeBgBtn" type="button">
-                                <span class="promo-icon"><svg><use href="#i-image"/></svg></span>
-                                <span class="promo-copy">
-                                    <strong>更换背景</strong>
-                                    <small>jpg / png / webp / gif，≤ 5MB</small>
-                                </span>
-                            </button>
-                            <button class="promo-item" id="resetBgBtn" type="button" hidden>
-                                <span class="promo-icon"><svg><use href="#i-refresh"/></svg></span>
-                                <span class="promo-copy">
-                                    <strong>恢复默认背景</strong>
-                                    <small>移除自定义背景图</small>
-                                </span>
-                            </button>
-                            <button class="promo-item" id="logoutBtn" type="button">
-                                <span class="promo-icon"><svg><use href="#i-logout"/></svg></span>
-                                <span class="promo-copy">
-                                    <strong>退出登录</strong>
-                                    <small>会停止拦截并回到登录页</small>
-                                </span>
-                            </button>
-                            <input type="file" id="bgFileInput" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-                        </div>
-                        <div class="operator-card">
-                            <strong>BaiLan Relay Client</strong>
-                            <small>Local capture · Devin</small>
-                            <span class="version" id="uiVersion">UI 3.0</span>
-                        </div>
-                        <div class="promo-card">
-                            <a class="promo-item" id="cursorhubLink" href="https://cursorhub.bitheart.top/" target="_blank" rel="noopener">
-                                <span class="promo-icon"><svg><use href="#i-external"/></svg></span>
-                                <span class="promo-copy">
-                                    <strong>查看其他产品</strong>
-                                    <small>CursorHub · 模型连接与用量</small>
-                                </span>
-                            </a>
-                            <button class="promo-item" id="qqGroupBtn" type="button">
-                                <span class="promo-icon"><svg><use href="#i-users"/></svg></span>
-                                <span class="promo-copy">
-                                    <strong>QQ 交流群</strong>
-                                    <small>386427683 · 点击复制</small>
-                                </span>
-                            </button>
-                        </div>
-                        <button class="quit-button" id="quitBtn" type="button"><svg><use href="#i-stop"/></svg>退出并恢复</button>
-                    </div>
-                </div>
 
                 <div class="win-controls" id="winControls" hidden>
                     <button class="win-btn" type="button" data-win="min" title="最小化" aria-label="最小化">
@@ -206,6 +179,7 @@
             </div>
             <div class="win-resize-top" aria-hidden="true"></div>
         </header>
+        </div>
 
         <main class="workspace">
             <div class="admin-banner" id="adminBanner" hidden>
@@ -219,7 +193,7 @@
             <div class="global-notice" id="globalNotice" hidden>
                 <span class="notice-icon"><svg><use href="#i-check"/></svg></span>
                 <span class="notice-message" id="noticeMessage"></span>
-                <button class="notice-action" id="noticeAction" type="button" hidden>查看日志</button>
+                <button class="notice-action" id="noticeAction" type="button" hidden>监控日志</button>
                 <button class="notice-close" id="noticeClose" type="button" aria-label="关闭提示">×</button>
             </div>
 
@@ -240,37 +214,211 @@
                 <button class="announcement-close" id="announcementClose" type="button" aria-label="关闭公告">×</button>
             </div>
 
+            <section class="page" id="page-profile" data-page="profile">
+                <div class="page-scroll profile-scroll">
+                    <div class="profile-shell">
+                        <div class="profile-stage">
+                            <header class="profile-hero">
+                                <button class="profile-avatar" id="profileAvatarBtn" type="button" title="更换头像">
+                                    <span class="avatar" id="profileAvatar" aria-hidden="true"></span>
+                                    <span class="profile-avatar-tip">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
+                                        <span>更换</span>
+                                    </span>
+                                </button>
+                                <input type="file" id="profileAvatarInput" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                                <div class="profile-meta">
+                                    <div class="profile-name-row">
+                                        <strong id="profileName">DevinHub</strong>
+                                        <button class="profile-name-edit" id="profileEditNameBtn" type="button" title="编辑昵称">编辑</button>
+                                        <input class="profile-name-input" id="profileNameInput" type="text" maxlength="20" hidden autocomplete="off" spellcheck="false" aria-label="昵称">
+                                    </div>
+                                    <span id="profileEmail">未登录</span>
+                                    <small class="operator-line"><span class="operator-dot" id="operatorDot"></span><span id="operatorRole">正在确认权限</span></small>
+                                </div>
+                            </header>
+                            <div class="profile-bg-col">
+                                <div class="profile-bg-wrap">
+                                    <button class="profile-bg" id="profileChangeBgBtn" type="button" title="更换背景">
+                                        <span class="profile-bg-preview" id="profileBgPreview"><img class="profile-bg-img" id="profileBgImg" alt="" decoding="async" hidden></span>
+                                        <span class="profile-bg-caption">
+                                            <strong>更换背景</strong>
+                                            <small>jpg / png / webp / gif，不超过 5MB；png / webp 支持透明</small>
+                                        </span>
+                                    </button>
+                                    <button class="text-button profile-bg-reset" id="profileResetBgBtn" type="button" hidden>恢复默认</button>
+                                    <div class="profile-bg-opacity" id="profileBgOpacityWrap" hidden role="group" aria-labelledby="profileBgOpacityLabel">
+                                        <span id="profileBgOpacityLabel">遮罩</span>
+                                        <input type="range" id="profileBgOpacity" min="0" max="85" step="5" value="40" aria-valuemin="0" aria-valuemax="85" aria-labelledby="profileBgOpacityLabel" title="PNG/WebP 透明处透出主题色；越低越透">
+                                        <output id="profileBgOpacityOut" for="profileBgOpacity">40%</output>
+                                    </div>
+                                </div>
+                                <input type="file" id="bgFileInput" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                            </div>
+                        </div>
+
+                        <section class="profile-block">
+                            <div class="profile-overview" id="profileOverview" data-state="pending">
+                                <div class="profile-stat">
+                                    <small>效益包</small>
+                                    <strong id="profileLicDays">—</strong>
+                                    <span id="profileLicExpiry">—</span>
+                                </div>
+                                <div class="profile-stat">
+                                    <small>余额</small>
+                                    <strong id="profileBalance">—</strong>
+                                    <span id="profileBalanceNote">—</span>
+                                </div>
+                                <div class="profile-stat">
+                                    <small>卡密</small>
+                                    <strong class="is-code" id="profileCardKey">—</strong>
+                                    <span id="profileCardNote">—</span>
+                                </div>
+                                <button class="button primary compact" id="profileTopupBtn" type="button"><span>去商城</span></button>
+                            </div>
+                            <div class="profile-grid">
+                                <button class="profile-card" id="qqGroupBtn" type="button">
+                                    <span class="profile-card-icon"><svg><use href="#i-chat"/></svg></span>
+                                    <span class="profile-card-copy">
+                                        <strong>QQ 交流群</strong>
+                                        <small class="is-number">386427683</small>
+                                    </span>
+                                    <span class="profile-card-action">复制群号</span>
+                                </button>
+                                <a class="profile-card" id="cursorhubLink" href="https://cursorhub.bitheart.top/" target="_blank" rel="noopener">
+                                    <span class="profile-card-icon"><svg><use href="#i-apps"/></svg></span>
+                                    <span class="profile-card-copy">
+                                        <strong>其他产品</strong>
+                                        <small>CursorHub · 模型连接与用量</small>
+                                    </span>
+                                    <span class="profile-card-action">打开官网</span>
+                                </a>
+                                <button class="profile-card is-quiet" id="logoutBtn" type="button">
+                                    <span class="profile-card-icon"><svg><use href="#i-signout"/></svg></span>
+                                    <span class="profile-card-copy">
+                                        <strong>切换账号</strong>
+                                        <small>停止拦截，回到登录页</small>
+                                    </span>
+                                    <span class="profile-card-action">退出登录</span>
+                                </button>
+                                <button class="profile-card is-danger" id="quitBtn" type="button">
+                                    <span class="profile-card-icon"><svg><use href="#i-restore"/></svg></span>
+                                    <span class="profile-card-copy">
+                                        <strong>退出程序</strong>
+                                        <small>停止拦截，并还原本机 hosts</small>
+                                    </span>
+                                    <span class="profile-card-action">退出并恢复</span>
+                                </button>
+                            </div>
+                        </section>
+                        <p class="app-version" data-app-version></p>
+                    </div>
+                </div>
+            </section>
+
             <section class="page active" id="page-home" data-page="home">
                 <div class="page-scroll">
                     <article class="panel license-panel" id="licensePanel">
-                        <div class="panel-header">
-                            <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-key"/></svg>卡密授权</h3></div>
-                            <span class="badge neutral" id="licenseBadge">未激活</span>
-                        </div>
-                        <h4 class="license-lede">开启本机授权</h4>
-                        <p class="panel-description" id="licenseInfo">请输入卡密并激活后方可启动拦截。授权与本机绑定，一卡一机。</p>
-                        <div class="license-form" id="licenseForm">
-                            <input class="text-input" id="licenseInput" type="text" placeholder="请输入卡密，例如 A2C4-K7M9-XXXX-XXXX" autocomplete="off" spellcheck="false" />
-                            <button class="button control-primary" id="activateLicenseBtn" type="button"><span>激活</span></button>
+                        <div class="license-line">
+                            <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-bag"/></svg>效益包</h3>
+                            <p class="panel-description" id="licenseInfo">聊天前需开通效益包或充值余额</p>
+                            <div class="license-form" id="licenseForm">
+                                <input class="text-input" id="licenseInput" type="text" placeholder="输入卡密或充值码" autocomplete="off" spellcheck="false" />
+                                <button class="button control-primary" id="activateLicenseBtn" type="button"><span>兑换</span></button>
+                                <button class="button" id="homeShopBtn" type="button"><span>去商城</span></button>
+                            </div>
                         </div>
                     </article>
                     <article class="status-board" id="statusBoard" data-state="checking">
-                        <header class="deck-head">
-                            <div class="deck-title">
-                                <span class="deck-icon" aria-hidden="true"><svg><use href="#i-route"/></svg></span>
-                                <h2 id="captureTitle">正在读取运行状态</h2>
-                                <span class="status-led" aria-hidden="true"></span>
-                                <div class="chip-row" id="chipRow" aria-label="当前配置"></div>
-                            </div>
-                            <div class="deck-tools">
-                                <span class="badge neutral" id="captureBadge">检测中</span>
-                                <time id="updatedAt">正在检测</time>
-                                <button class="icon-button" id="refreshStatusBtn" type="button" title="刷新状态" aria-label="刷新状态">
-                                    <svg><use href="#i-refresh"/></svg>
-                                </button>
-                            </div>
-                        </header>
-
+                                                <div class="grain-field" aria-hidden="true">
+                            <span style="--y:5%;--o:0.9;--d:46s;--delay:-0.3s;--spin:34s;--a:13deg;--turn:360deg"><i></i></span>
+                            <span style="--y:42%;--o:0.55;--d:51s;--delay:-1.1s;--spin:41s;--a:60deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:79%;--o:0.8;--d:56s;--delay:-2.0s;--spin:48s;--a:107deg;--turn:360deg"><i></i></span>
+                            <span style="--y:26%;--o:0.5;--d:61s;--delay:-3.1s;--spin:55s;--a:154deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:63%;--o:0.75;--d:66s;--delay:-4.3s;--spin:62s;--a:201deg;--turn:360deg"><i></i></span>
+                            <span style="--y:10%;--o:0.85;--d:49s;--delay:-3.9s;--spin:69s;--a:248deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:47%;--o:0.45;--d:54s;--delay:-5.1s;--spin:36s;--a:295deg;--turn:360deg"><i></i></span>
+                            <span style="--y:84%;--o:0.6;--d:59s;--delay:-6.4s;--spin:43s;--a:342deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:31%;--o:0.4;--d:64s;--delay:-7.9s;--spin:50s;--a:29deg;--turn:360deg"><i></i></span>
+                            <span style="--y:68%;--o:0.7;--d:47s;--delay:-6.5s;--spin:57s;--a:76deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:15%;--o:0.8;--d:52s;--delay:-7.9s;--spin:64s;--a:123deg;--turn:360deg"><i></i></span>
+                            <span style="--y:52%;--o:0.5;--d:57s;--delay:-9.5s;--spin:71s;--a:170deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:89%;--o:0.65;--d:62s;--delay:-11.2s;--spin:38s;--a:217deg;--turn:360deg"><i></i></span>
+                            <span style="--y:36%;--o:0.55;--d:67s;--delay:-13.1s;--spin:45s;--a:264deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:73%;--o:0.35;--d:50s;--delay:-10.5s;--spin:52s;--a:311deg;--turn:360deg"><i></i></span>
+                            <span style="--y:20%;--o:0.6;--d:55s;--delay:-12.4s;--spin:59s;--a:358deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:57%;--o:0.7;--d:60s;--delay:-14.3s;--spin:66s;--a:45deg;--turn:360deg"><i></i></span>
+                            <span style="--y:94%;--o:0.8;--d:65s;--delay:-16.5s;--spin:73s;--a:92deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:41%;--o:0.45;--d:48s;--delay:-12.9s;--spin:40s;--a:139deg;--turn:360deg"><i></i></span>
+                            <span style="--y:78%;--o:0.65;--d:53s;--delay:-15.0s;--spin:47s;--a:186deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:25%;--o:0.75;--d:58s;--delay:-17.2s;--spin:54s;--a:233deg;--turn:360deg"><i></i></span>
+                            <span style="--y:62%;--o:0.5;--d:63s;--delay:-19.6s;--spin:61s;--a:280deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:9%;--o:0.6;--d:46s;--delay:-15.0s;--spin:68s;--a:327deg;--turn:360deg"><i></i></span>
+                            <span style="--y:46%;--o:0.55;--d:51s;--delay:-17.4s;--spin:35s;--a:14deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:83%;--o:0.4;--d:56s;--delay:-19.9s;--spin:42s;--a:61deg;--turn:360deg"><i></i></span>
+                            <span style="--y:30%;--o:0.9;--d:61s;--delay:-22.5s;--spin:49s;--a:108deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:67%;--o:0.55;--d:66s;--delay:-25.3s;--spin:56s;--a:155deg;--turn:360deg"><i></i></span>
+                            <span style="--y:14%;--o:0.8;--d:49s;--delay:-19.5s;--spin:63s;--a:202deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:51%;--o:0.5;--d:54s;--delay:-22.3s;--spin:70s;--a:249deg;--turn:360deg"><i></i></span>
+                            <span style="--y:88%;--o:0.75;--d:59s;--delay:-25.2s;--spin:37s;--a:296deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:35%;--o:0.85;--d:64s;--delay:-28.3s;--spin:44s;--a:343deg;--turn:360deg"><i></i></span>
+                            <span style="--y:72%;--o:0.45;--d:47s;--delay:-21.5s;--spin:51s;--a:30deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:19%;--o:0.6;--d:52s;--delay:-24.5s;--spin:58s;--a:77deg;--turn:360deg"><i></i></span>
+                            <span style="--y:56%;--o:0.4;--d:57s;--delay:-27.7s;--spin:65s;--a:124deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:93%;--o:0.7;--d:62s;--delay:-31.0s;--spin:72s;--a:171deg;--turn:360deg"><i></i></span>
+                            <span style="--y:40%;--o:0.8;--d:67s;--delay:-34.5s;--spin:39s;--a:218deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:77%;--o:0.5;--d:50s;--delay:-26.4s;--spin:46s;--a:265deg;--turn:360deg"><i></i></span>
+                            <span style="--y:24%;--o:0.65;--d:55s;--delay:-29.9s;--spin:53s;--a:312deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:61%;--o:0.55;--d:60s;--delay:-33.5s;--spin:60s;--a:359deg;--turn:360deg"><i></i></span>
+                            <span style="--y:8%;--o:0.35;--d:65s;--delay:-37.2s;--spin:67s;--a:46deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:45%;--o:0.6;--d:48s;--delay:-28.2s;--spin:34s;--a:93deg;--turn:360deg"><i></i></span>
+                            <span style="--y:82%;--o:0.7;--d:53s;--delay:-31.9s;--spin:41s;--a:140deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:29%;--o:0.8;--d:58s;--delay:-35.7s;--spin:48s;--a:187deg;--turn:360deg"><i></i></span>
+                            <span style="--y:66%;--o:0.45;--d:63s;--delay:-39.7s;--spin:55s;--a:234deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:13%;--o:0.65;--d:46s;--delay:-29.7s;--spin:62s;--a:281deg;--turn:360deg"><i></i></span>
+                            <span style="--y:50%;--o:0.75;--d:51s;--delay:-33.6s;--spin:69s;--a:328deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:87%;--o:0.5;--d:56s;--delay:-37.7s;--spin:36s;--a:15deg;--turn:360deg"><i></i></span>
+                            <span style="--y:34%;--o:0.6;--d:61s;--delay:-42.0s;--spin:43s;--a:62deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:71%;--o:0.55;--d:66s;--delay:-46.4s;--spin:50s;--a:109deg;--turn:360deg"><i></i></span>
+                            <span style="--y:18%;--o:0.4;--d:49s;--delay:-35.2s;--spin:57s;--a:156deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:55%;--o:0.55;--d:54s;--delay:-39.5s;--spin:64s;--a:203deg;--turn:360deg"><i></i></span>
+                            <span style="--y:92%;--o:0.5;--d:59s;--delay:-44.0s;--spin:71s;--a:250deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:39%;--o:0.45;--d:64s;--delay:-48.7s;--spin:38s;--a:297deg;--turn:360deg"><i></i></span>
+                            <span style="--y:76%;--o:0.6;--d:47s;--delay:-36.4s;--spin:45s;--a:344deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:23%;--o:0.4;--d:52s;--delay:-41.1s;--spin:52s;--a:31deg;--turn:360deg"><i></i></span>
+                            <span style="--y:60%;--o:0.7;--d:57s;--delay:-45.8s;--spin:59s;--a:78deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:7%;--o:0.5;--d:62s;--delay:-50.8s;--spin:66s;--a:125deg;--turn:360deg"><i></i></span>
+                            <span style="--y:44%;--o:0.65;--d:67s;--delay:-55.8s;--spin:73s;--a:172deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:81%;--o:0.55;--d:50s;--delay:-42.4s;--spin:40s;--a:219deg;--turn:360deg"><i></i></span>
+                            <span style="--y:28%;--o:0.35;--d:55s;--delay:-47.4s;--spin:47s;--a:266deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:65%;--o:0.6;--d:60s;--delay:-52.6s;--spin:54s;--a:313deg;--turn:360deg"><i></i></span>
+                            <span style="--y:12%;--o:0.7;--d:65s;--delay:-57.9s;--spin:61s;--a:0deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:49%;--o:0.8;--d:48s;--delay:-43.5s;--spin:68s;--a:47deg;--turn:360deg"><i></i></span>
+                            <span style="--y:86%;--o:0.45;--d:53s;--delay:-48.8s;--spin:35s;--a:94deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:33%;--o:0.65;--d:58s;--delay:-54.2s;--spin:42s;--a:141deg;--turn:360deg"><i></i></span>
+                            <span style="--y:70%;--o:0.5;--d:63s;--delay:-59.8s;--spin:49s;--a:188deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:17%;--o:0.6;--d:46s;--delay:-44.3s;--spin:56s;--a:235deg;--turn:360deg"><i></i></span>
+                            <span style="--y:54%;--o:0.55;--d:51s;--delay:-49.9s;--spin:63s;--a:282deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:91%;--o:0.4;--d:56s;--delay:-55.6s;--spin:70s;--a:329deg;--turn:360deg"><i></i></span>
+                            <span style="--y:8%;--o:0.40;--d:44s;--delay:-1.2s;--spin:36s;--a:20deg;--turn:360deg"><i></i></span>
+                            <span style="--y:55%;--o:0.50;--d:47s;--delay:-3.9s;--spin:41s;--a:73deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:18%;--o:0.60;--d:50s;--delay:-6.9s;--spin:46s;--a:126deg;--turn:360deg"><i></i></span>
+                            <span style="--y:65%;--o:0.70;--d:53s;--delay:-10.3s;--spin:51s;--a:179deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:28%;--o:0.80;--d:56s;--delay:-14.0s;--spin:56s;--a:232deg;--turn:360deg"><i></i></span>
+                            <span style="--y:75%;--o:0.40;--d:59s;--delay:-18.0s;--spin:61s;--a:285deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:38%;--o:0.50;--d:62s;--delay:-22.4s;--spin:66s;--a:338deg;--turn:360deg"><i></i></span>
+                            <span style="--y:85%;--o:0.60;--d:65s;--delay:-27.1s;--spin:71s;--a:31deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:48%;--o:0.70;--d:44s;--delay:-20.8s;--spin:40s;--a:84deg;--turn:360deg"><i></i></span>
+                            <span style="--y:11%;--o:0.80;--d:47s;--delay:-24.8s;--spin:45s;--a:137deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:58%;--o:0.40;--d:50s;--delay:-29.2s;--spin:50s;--a:190deg;--turn:360deg"><i></i></span>
+                            <span style="--y:21%;--o:0.50;--d:53s;--delay:-33.9s;--spin:55s;--a:243deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:68%;--o:0.60;--d:56s;--delay:-38.9s;--spin:60s;--a:296deg;--turn:360deg"><i></i></span>
+                            <span style="--y:31%;--o:0.70;--d:59s;--delay:-44.2s;--spin:65s;--a:349deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:78%;--o:0.80;--d:62s;--delay:-49.9s;--spin:70s;--a:42deg;--turn:360deg"><i></i></span>
+                            <span style="--y:41%;--o:0.40;--d:65s;--delay:-56.0s;--spin:39s;--a:95deg;--turn:-360deg"><i></i></span>
+                            <span style="--y:88%;--o:0.50;--d:44s;--delay:-40.3s;--spin:44s;--a:148deg;--turn:360deg"><i></i></span>
+                            <span style="--y:51%;--o:0.60;--d:47s;--delay:-45.7s;--spin:49s;--a:201deg;--turn:-360deg"><i></i></span>
+                        </div>
                         <div class="deck-body">
                             <div class="deck-main">
                                 <p class="status-summary" id="statusSummary">正在连接本地服务并检查中继地址。</p>
@@ -292,113 +440,33 @@
                                 </div>
                             </div>
 
+                            <div class="deck-side">
+                                <div class="deck-aside">
+                                <div class="chip-row" aria-label="当前配置">
+                                    <div id="chipRow"></div>
+                                    <div class="chip-updated">
+                                        <time id="updatedAt">正在检测</time>
+                                        <button class="icon-button" id="refreshStatusBtn" type="button" title="刷新状态" aria-label="刷新状态">
+                                            <svg><use href="#i-refresh"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <span class="badge neutral" id="captureBadge" hidden>检测中</span>
+                            </div>
                             <aside class="status-side" aria-label="运行状态">
                                 <span class="control-state visually-hidden" id="controlState">待机</span>
                                 <div class="health-grid">
                                     <div class="health-item">
-                                        <div class="health-label"><span>应用级捕获</span></div>
+                                        <div class="health-label"><span>Devin</span></div>
                                         <span class="badge neutral" id="proxyBadge">检测中</span>
                                     </div>
                                     <div class="health-item">
                                         <div class="health-label"><span>中继服务</span></div>
-                                        <div class="health-actions">
-                                            <button class="inline-action" id="testRelayBtn" type="button">测试</button>
-                                            <span class="badge neutral" id="relayBadge">检测中</span>
-                                        </div>
-                                    </div>
-                                    <div class="health-item">
-                                        <div class="health-label"><span>网络延迟</span></div>
-                                        <span class="badge neutral hb-badge" id="hbBadge">检测中</span>
+                                        <span class="badge neutral" id="relayBadge">检测中</span>
                                     </div>
                                 </div>
                             </aside>
-                        </div>
-                    </article>
-
-                    <article class="panel heartbeat-panel" id="heartbeatPanel" data-state="idle">
-                        <div class="panel-header">
-                            <div>
-                                
-                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-pulse"/></svg>心跳监控</h3>
                             </div>
-                            <div class="hb-live"><span class="hb-dot" aria-hidden="true"></span><span id="hbLiveText">连接中</span></div>
-                        </div>
-                        <div class="hb-body">
-                            <div class="hb-now">
-                                <div class="hb-reading">
-                                    <strong id="hbValue">--</strong><em>ms</em>
-                                </div>
-                                <span class="hb-quality" id="hbQuality">等待首次探测</span>
-                                <small class="hb-target" id="hbTarget">中继延迟 · 每 3 秒探测</small>
-                            </div>
-                            <div class="hb-chart-wrap">
-                                <svg class="hb-chart" id="hbChart" viewBox="0 0 400 96" preserveAspectRatio="none" aria-label="延迟趋势图" role="img">
-                                    <defs>
-                                        <linearGradient id="hbFill" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0" stop-color="currentColor" stop-opacity=".32"/>
-                                            <stop offset="1" stop-color="currentColor" stop-opacity="0"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <g class="hb-grid"><line x1="0" y1="24" x2="400" y2="24"/><line x1="0" y1="48" x2="400" y2="48"/><line x1="0" y1="72" x2="400" y2="72"/></g>
-                                    <path class="hb-area" id="hbArea" fill="url(#hbFill)" d=""/>
-                                    <path class="hb-line" id="hbLine" d="" fill="none"/>
-                                </svg>
-                                <div class="hb-fails" id="hbFails" aria-hidden="true"></div>
-                            </div>
-                        </div>
-                        <dl class="hb-stats">
-                            <div><dt>平均</dt><dd id="hbAvg">--</dd></div>
-                            <div><dt>最低</dt><dd id="hbMin">--</dd></div>
-                            <div><dt>最高</dt><dd id="hbMax">--</dd></div>
-                            <div><dt>丢包率</dt><dd id="hbLoss">0%</dd></div>
-                            <div><dt>采样</dt><dd id="hbCount">0</dd></div>
-                        </dl>
-                    </article>
-
-                    <article class="panel route-panel">
-                        <div class="panel-header">
-                            <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-route"/></svg>模型路由</h3></div>
-                            <div class="route-preview">
-                                <span>SWE-1.6</span><svg><use href="#i-arrow"/></svg><strong id="routeTarget">—</strong>
-                                <span class="billing-chip" id="routeBilling" data-tier="paid">收费模型</span>
-                            </div>
-                        </div>
-                        <div class="model-options" id="modelOptions" hidden>
-                            <label class="model-option" for="modelEffort" id="modelEffortField">
-                                <span>思考强度</span>
-                                <select id="modelEffort"></select>
-                            </label>
-                            <label class="model-option" for="modelContext" id="modelContextField">
-                                <span>上下文大小</span>
-                                <select id="modelContext"></select>
-                            </label>
-                        </div>
-                        <div class="model-toolbar">
-                            <div class="segment-control model-tabs" id="modelTabs" aria-label="模型系列"></div>
-                            <label class="model-free-toggle" for="modelFreeOnly">
-                                <span class="switch"><input id="modelFreeOnly" type="checkbox"><span></span></span>仅免费
-                            </label>
-                            <label class="search-box" for="modelSearch">
-                                <svg><use href="#i-search"/></svg>
-                                <input id="modelSearch" type="search" placeholder="搜索模型名称或 ID" autocomplete="off">
-                            </label>
-                        </div>
-                        <div class="model-wall" id="modelWall" role="listbox" aria-label="上游模型"></div>
-                        <p class="preview-empty" id="modelWallEmpty" hidden>没有符合条件的模型。</p>
-                        <small class="model-wall-hint" id="modelWallHint">仅替换 Devin 发出的 SWE-1.6 系列请求。可选模型由后台下发。</small>
-                    </article>
-
-                    <article class="panel activity-panel">
-                        <div class="panel-header">
-                            <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-activity"/></svg>中继活动</h3></div>
-                            <span class="activity-total" id="activityTotal">累计处理 —</span>
-                        </div>
-                        <div class="activity-grid">
-                            <div class="activity-item"><span class="activity-icon"><svg><use href="#i-server"/></svg></span><div><small>服务器</small><strong id="activityServer">检测中</strong></div></div>
-                            <div class="activity-item"><span class="activity-icon"><svg><use href="#i-activity"/></svg></span><div><small>等待队列</small><strong id="activityQueue">—</strong></div></div>
-                            <div class="activity-item"><span class="activity-icon"><svg><use href="#i-key"/></svg></span><div><small>会话凭据</small><strong id="activityJwt">—</strong></div></div>
-                            <div class="activity-item"><span class="activity-icon"><svg><use href="#i-clock"/></svg></span><div><small>最近完成</small><strong id="activityLast">—</strong></div></div>
-                            <div class="activity-item"><span class="activity-icon"><svg><use href="#i-route"/></svg></span><div><small>正在处理</small><strong id="activityCurrent">—</strong></div></div>
                         </div>
                     </article>
 
@@ -413,20 +481,136 @@
                 </div>
             </section>
 
-            <section class="page usage-page" id="page-usage" data-page="usage">
-                <header class="page-header">
-                    <div>
-                        <h1>用量与扣费</h1>
-                        <p class="page-description">查看当前卡密的模型调用、Token 消耗与扣费明细。</p>
-                    </div>
-                    <div class="page-header-actions">
-                        <span class="badge success" id="usageBalance" hidden title="高级模型按倍率从余额扣费">余额 —</span>
-                        <button class="button secondary compact" id="usageRefreshBtn" type="button">
-                            <svg><use href="#i-refresh"/></svg><span>刷新</span>
-                        </button>
-                    </div>
-                </header>
+            <section class="page" id="page-models" data-page="models">
+                <div class="page-scroll">
+                    <article class="panel route-panel">
+                        <div class="model-pin">
+                            <div class="model-select-card" hidden>
+                                <div class="model-select-main">
+                                    <span class="deck-icon" aria-hidden="true"><svg><use href="#i-route"/></svg></span>
+                                    <div class="model-select-copy">
+                                        <div class="route-preview">
+                                            <span>默认</span><svg><use href="#i-arrow"/></svg><strong id="routeTarget">—</strong>
+                                            <span class="billing-chip" id="routeBilling" data-tier="paid">收费模型</span>
+                                        </div>
+                                        <p class="model-select-note">在 Devin 的模型列表里切换。这里只决定对话仍使用 SWE-1.6 时的默认模型。</p>
+                                    </div>
+                                </div>
+                                <div class="model-options" id="modelOptions" hidden>
+                                    <div class="model-option" id="modelEffortField">
+                                        <span>思考强度</span>
+                                        <div class="pick">
+                                            <select id="modelEffort" class="pick-native" tabindex="-1" aria-hidden="true"></select>
+                                            <button class="pick-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                                                <span class="pick-value">default</span>
+                                                <svg aria-hidden="true"><use href="#i-chevron"/></svg>
+                                            </button>
+                                            <div class="pick-menu" role="listbox" hidden></div>
+                                        </div>
+                                    </div>
+                                    <div class="model-option" id="modelContextField">
+                                        <span>上下文大小</span>
+                                        <div class="pick">
+                                            <select id="modelContext" class="pick-native" tabindex="-1" aria-hidden="true"></select>
+                                            <button class="pick-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                                                <span class="pick-value">默认</span>
+                                                <svg aria-hidden="true"><use href="#i-chevron"/></svg>
+                                            </button>
+                                            <div class="pick-menu" role="listbox" hidden></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="model-filters" id="modelFilters">
+                                <div class="model-filter-line">
+                                    <span class="model-filter-label">厂商</span>
+                                    <div class="model-filter-row" id="modelSeriesRow" role="listbox" aria-label="厂商"></div>
+                                </div>
+                                <div class="model-filter-rule"></div>
+                                <div class="model-filter-line">
+                                    <span class="model-filter-label">分组</span>
+                                    <div class="model-filter-row" id="modelCategoryRow" role="listbox" aria-label="分组"></div>
+                                </div>
+                                <div class="model-filter-rule"></div>
+                                <div class="model-filter-line">
+                                    <span class="model-filter-label">倍率</span>
+                                    <div class="model-filter-row" id="modelRateRow" role="listbox" aria-label="倍率"></div>
+                                </div>
+                                <div class="model-filter-rule"></div>
+                                <div class="model-filter-tools">
+                                    <label class="model-free-toggle" for="modelFreeOnly">
+                                        <span class="switch"><input id="modelFreeOnly" type="checkbox"><span></span></span>仅免费
+                                    </label>
+                                    <div class="model-sort" role="group" aria-label="排序">
+                                        <button class="model-sort-btn" id="modelSortName" type="button" aria-pressed="false">按名称排序</button>
+                                        <button class="model-sort-btn" id="modelSortPrice" type="button" aria-pressed="false">按价格排序</button>
+                                    </div>
+                                    <span class="model-unit-note">单价按每百万 Token 计</span>
+                                    <label class="search-box" for="modelSearch">
+                                        <svg><use href="#i-search"/></svg>
+                                        <input id="modelSearch" type="search" placeholder="搜索模型名称或 ID" autocomplete="off">
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="model-list" id="modelList">
+                            <div class="model-wall model-wall-readonly" id="modelWall" role="list" aria-label="上游模型"></div>
+                            <p class="preview-empty" id="modelWallEmpty" hidden>没有符合条件的模型。</p>
+                            <p class="model-load-hint" id="modelLoadHint"></p>
+                        </div>
+                    </article>
+                </div>
+            </section>
 
+            <section class="page shop-page" id="page-shop" data-page="shop">
+                <div class="page-scroll">
+                    <div class="usage-skeleton" id="shopSkeleton" aria-hidden="true">
+                        <div class="usage-skel-block shop-skel-wallet"></div>
+                        <div class="shop-skel-grid"><span></span><span></span><span></span></div>
+                    </div>
+
+                    <article class="panel usage-empty" id="shopEmpty" data-view="error" hidden>
+                        <span class="usage-empty-icon"><svg><use href="#i-alert"/></svg></span>
+                        <strong id="shopEmptyTitle">商城加载失败</strong>
+                        <p id="shopEmptyText"></p>
+                        <button class="button secondary compact" id="shopEmptyAction" type="button"><span>重试</span></button>
+                    </article>
+
+                    <div class="shop-content" id="shopContent" hidden>
+                        <section class="shop-wallet" id="shopWallet" data-pack="none" aria-label="我的钱包">
+                            <div class="shop-stat" id="shopPackStat">
+                                <small>效益包</small>
+                                <strong id="shopPackState">未开通</strong>
+                                <span id="shopPackNote">开通后可使用免费模型</span>
+                            </div>
+                            <div class="shop-stat">
+                                <small>余额</small>
+                                <strong id="shopBalance">—</strong>
+                                <span id="shopBalanceNote">充值后可使用高级模型</span>
+                            </div>
+                            <div class="shop-redeem">
+                                <label for="shopRedeemInput">卡密 / 充值码</label>
+                                <div class="license-form">
+                                    <input class="text-input" id="shopRedeemInput" type="text" placeholder="输入卡密或充值码" autocomplete="off" spellcheck="false" />
+                                    <button class="button primary" id="shopRedeemBtn" type="button"><span>兑换</span></button>
+                                </div>
+                                <span>卡密开通效益包，充值码增加余额。<a id="shopBuyKeyLink" href="https://pay.ldxp.cn/shop/wanjia">购买卡密</a></span>
+                            </div>
+                        </section>
+
+                        <section class="shop-section" aria-labelledby="shopPacksTitle">
+                            <header class="shop-section-head">
+                                <h3 id="shopPacksTitle">效益包</h3>
+                                <p>有效期内可使用免费模型。用余额购买立即生效，没到期时再买会接着顺延；高级模型始终按用量从余额扣费。</p>
+                            </header>
+                            <div class="shop-grid" id="shopGrid"></div>
+                            <p class="preview-empty" id="shopNone" hidden>商城暂时没有上架效益包，可以先用卡密兑换。</p>
+                        </section>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page usage-page" id="page-usage" data-page="usage">
                 <div class="page-scroll usage-scroll">
                     <div class="usage-skeleton" id="usageSkeleton" aria-hidden="true">
                         <div class="usage-skel-stats"><span></span><span></span><span></span><span></span></div>
@@ -442,6 +626,12 @@
                     </article>
 
                     <div class="usage-content" id="usageContent" hidden>
+                        <div class="segment-control usage-view-switch" id="usageViewSwitch" aria-label="用量视图">
+                            <span class="segment-thumb" aria-hidden="true"></span>
+                            <button class="active" type="button" data-usage-view="mine">我的用量</button>
+                            <button type="button" data-usage-view="board" id="usageBoardTab">用量排行榜</button>
+                        </div>
+                        <div id="usageMine">
                         <article class="panel usage-stats">
                             <div class="usage-stat is-cost">
                                 <small>总花费</small>
@@ -469,13 +659,15 @@
                         </article>
 
                         <p class="usage-note" id="usageBillingNote" hidden>
-                            <svg><use href="#i-info"/></svg><span>计费未启用：当前卡密不按用量扣费，以下金额仅供参考。</span>
+                            <svg><use href="#i-info"/></svg><span>计费未启用：当前不按用量扣余额，以下金额仅供参考。</span>
                         </p>
 
+                        <div class="usage-board">
                         <article class="panel usage-chart-panel">
                             <div class="panel-header">
-                                <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-chart"/></svg><span id="usageChartTitle">累计花费</span></h3></div>
+                                <div class="usage-title"><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-route"/></svg><span id="usageChartTitle">累计花费</span></h3></div>
                                 <div class="segment-control" id="usageMetric" aria-label="图表指标">
+                                    <span class="segment-thumb" aria-hidden="true"></span>
                                     <button class="active" type="button" data-usage-metric="cost">花费</button>
                                     <button type="button" data-usage-metric="tokens">Token</button>
                                     <button type="button" data-usage-metric="calls">调用次数</button>
@@ -492,43 +684,161 @@
 
                         <article class="panel usage-records-panel">
                             <div class="panel-header">
-                                <div><h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-history"/></svg>用量明细</h3></div>
+                                <div class="usage-title">
+                                    <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-history"/></svg>用量</h3>
+                                </div>
                                 <div class="segment-control" id="usageRange" aria-label="统计范围">
+                                    <span class="segment-thumb" aria-hidden="true"></span>
                                     <button type="button" data-usage-days="1">1 天</button>
                                     <button type="button" data-usage-days="3">3 天</button>
                                     <button type="button" data-usage-days="7">7 天</button>
                                     <button class="active" type="button" data-usage-days="30">30 天</button>
                                 </div>
                             </div>
-                            <div class="usage-table-wrap">
+                            <div class="usage-table-wrap" id="usageTableWrap">
                                 <table class="usage-table">
                                     <thead>
-                                        <tr><th>时间</th><th>模型</th><th class="num" title="未命中缓存的新输入">输入</th><th class="num" title="缓存读 / 缓存写">缓存读/写</th><th class="num">输出</th><th class="num">费用</th></tr>
+                                        <tr><th>时间</th><th>模型</th><th title="本次请求选择的思考强度">思考</th><th class="num" title="未命中缓存的新输入">输入</th><th class="num" title="缓存读 / 缓存写">缓存读/写</th><th class="num">输出</th><th class="num">费用</th></tr>
                                     </thead>
                                     <tbody id="usageRows"></tbody>
                                 </table>
                             </div>
                             <div class="usage-pager">
-                                <span id="usagePagerTotal">共 0 条</span>
-                                <div class="usage-pager-controls">
-                                    <button class="button secondary compact" id="usagePrevBtn" type="button">上一页</button>
-                                    <span id="usagePageText">第 1/1 页</span>
-                                    <button class="button secondary compact" id="usageNextBtn" type="button">下一页</button>
-                                </div>
+                                <span id="usagePagerTotal">已显示 0 / 0 条</span>
+                                <span id="usageMoreHint">滚到底部继续加载</span>
                             </div>
                         </article>
+                        </div>
+                        </div>
+                        <div id="usageRank" hidden>
+                            <p class="lb-announcement" id="lbAnnouncement" hidden></p>
+                            <label class="lb-optin" for="leaderboardOptIn">
+                                <span class="lb-optin-copy">参与排行榜<small id="lbOptInHint">开启后你的昵称、头像与用量对所有用户可见，实时生效。</small></span>
+                                <span class="switch"><input id="leaderboardOptIn" type="checkbox"><span></span></span>
+                            </label>
+                            <div class="lb-filters">
+                                <div class="segment-control" id="lbRange" aria-label="时间范围">
+                                    <span class="segment-thumb" aria-hidden="true"></span>
+                                    <button class="active" type="button" data-lb-range="all">全部</button>
+                                    <button type="button" data-lb-range="day">当日</button>
+                                    <button type="button" data-lb-range="month">当月</button>
+                                </div>
+                                <div class="lb-filters-right">
+                                <div class="segment-control" id="lbMetric" aria-label="排行指标">
+                                    <span class="segment-thumb" aria-hidden="true"></span>
+                                    <button class="active" type="button" data-lb-metric="cost">花费</button>
+                                    <button type="button" data-lb-metric="tokens">Token</button>
+                                    <button type="button" data-lb-metric="calls">调用次数</button>
+                                </div>
+                                </div>
+                            </div>
+                            <div class="lb-podium" id="lbPodium"></div>
+                            <div class="lb-list" id="lbList"></div>
+                            <button class="button secondary compact lb-more" id="lbMore" type="button" hidden>加载更多</button>
+                            <div class="lb-mebar" id="lbMebar"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page pool-page" id="page-pool" data-page="pool">
+                <div class="page-scroll">
+                    <div class="usage-skeleton" id="poolSkeleton" aria-hidden="true">
+                        <div class="usage-skel-stats"><span></span><span></span><span></span><span></span></div>
+                        <div class="usage-skel-block"></div>
+                    </div>
+
+                    <article class="panel usage-empty" id="poolEmpty" data-view="error" hidden>
+                        <span class="usage-empty-icon"><svg><use href="#i-alert"/></svg></span>
+                        <strong id="poolEmptyTitle">号池加载失败</strong>
+                        <p id="poolEmptyText"></p>
+                        <button class="button secondary compact" id="poolEmptyAction" type="button"><span>重试</span></button>
+                    </article>
+
+                    <div class="pool-content" id="poolContent" hidden>
+                        <div class="pool-pin">
+                        <div class="pool-head">
+                            <div class="pool-head-title">
+                                <h2>CC号池状态</h2>
+                            </div>
+                            <div class="pool-stats" id="poolStats" role="group" aria-label="CC号池筛选">
+                                <span class="pool-stats-thumb" id="poolStatsThumb" aria-hidden="true"></span>
+                                <button type="button" data-pool-filter="all" aria-pressed="true"><small>全部</small><strong id="poolCountAll">—</strong></button>
+                                <button type="button" data-pool-filter="active"><small>可用</small><strong id="poolCountActive">—</strong></button>
+                                <button type="button" data-pool-filter="paused"><small>暂停</small><strong id="poolCountPaused">—</strong></button>
+                                <button type="button" data-pool-filter="unavailable"><small>禁用</small><strong id="poolCountUnavailable">—</strong></button>
+                                <button type="button" data-pool-filter="high"><small>高用量</small><strong id="poolCountHigh">—</strong></button>
+                            </div>
+                            <div class="pool-head-actions">
+                                <div class="pool-sort" role="group" aria-label="排序">
+                                    <button class="pool-sort-btn" id="poolSortAvail" type="button" aria-pressed="true">按可用量 ↓</button>
+                                    <button class="pool-sort-btn" id="poolSortReset" type="button" aria-pressed="false">按重置时间</button>
+                                </div>
+                                <button class="button secondary compact" id="poolRefreshBtn" type="button">刷新</button>
+                            </div>
+                        </div>
+                        <p class="pool-stale" id="poolStale" hidden>数据可能不是最新</p>
+                        <div class="pool-tools">
+                            <div class="pool-groups" id="poolGroups" role="listbox" aria-label="分组" hidden></div>
+                        </div>
+                        </div>
+                        <div class="pool-scroll" id="poolScroll">
+                            <div class="pool-list" id="poolList"></div>
+                            <p class="preview-empty" id="poolFilterEmpty" hidden>没有符合条件的账号。</p>
+                        </div>
                     </div>
                 </div>
             </section>
 
             <section class="page log-page" id="page-log" data-page="log">
-                <header class="page-header">
-                    <div>
-                        <div class="title-line"><h1>实时日志</h1><span class="badge warning" id="logLiveBadge">已暂停</span></div>
-                        <p class="page-description">筛选本地捕获和中继事件；暂停显示不会停止日志采集。</p>
+                <article class="panel heartbeat-panel" id="heartbeatPanel" data-state="idle">
+                    <div class="panel-header">
+                        <div>
+                            <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-pulse"/></svg>心跳监控</h3>
+                        </div>
+                        <div class="hb-live"><span class="hb-dot" aria-hidden="true"></span><span id="hbLiveText">连接中</span></div>
                     </div>
-                </header>
-
+                    <div class="hb-body">
+                        <div class="hb-now">
+                            <div class="hb-reading">
+                                <strong id="hbValue">--</strong><em>ms</em>
+                            </div>
+                            <span class="hb-quality" id="hbQuality">等待首次探测</span>
+                            <small class="hb-target" id="hbTarget">中继延迟 · 每 3 秒探测</small>
+                        </div>
+                        <div class="hb-chart-wrap">
+                            <svg class="hb-chart" id="hbChart" viewBox="0 0 400 96" preserveAspectRatio="none" aria-label="延迟趋势图" role="img">
+                                <defs>
+                                    <linearGradient id="hbFill" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0" stop-color="currentColor" stop-opacity=".32"/>
+                                        <stop offset="1" stop-color="currentColor" stop-opacity="0"/>
+                                    </linearGradient>
+                                </defs>
+                                <g class="hb-grid"><line x1="0" y1="24" x2="400" y2="24"/><line x1="0" y1="48" x2="400" y2="48"/><line x1="0" y1="72" x2="400" y2="72"/></g>
+                                <path class="hb-area" id="hbArea" fill="url(#hbFill)" d=""/>
+                                <path class="hb-line" id="hbLine" d="" fill="none"/>
+                            </svg>
+                            <div class="hb-fails" id="hbFails" aria-hidden="true"></div>
+                        </div>
+                    </div>
+                    <dl class="hb-stats">
+                        <div><dt>平均</dt><dd id="hbAvg">--</dd></div>
+                        <div><dt>最低</dt><dd id="hbMin">--</dd></div>
+                        <div><dt>最高</dt><dd id="hbMax">--</dd></div>
+                        <div><dt>丢包率</dt><dd id="hbLoss">0%</dd></div>
+                        <div><dt>采样</dt><dd id="hbCount">0</dd></div>
+                    </dl>
+                </article>
+                <article class="panel adapt-panel" id="adaptPanel" data-state="idle" hidden>
+                    <div class="panel-header">
+                        <div>
+                            <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-check"/></svg>适配状态</h3>
+                            <p class="adapt-sub" id="adaptSub">尚未适配</p>
+                        </div>
+                        <span class="adapt-count" id="adaptCount" data-tone="ok"></span>
+                    </div>
+                    <div class="adapt-grid" id="adaptGrid"></div>
+                </article>
                 <article class="log-console">
                     <div class="log-toolbar">
                         <div class="segment-control" id="logFilters">
@@ -537,19 +847,19 @@
                             <button type="button" data-log-filter="error">异常</button>
                             <button type="button" data-log-filter="relay">转发</button>
                         </div>
-                        <label class="search-box" for="logSearch">
-                            <svg><use href="#i-search"/></svg>
-                            <input id="logSearch" type="search" placeholder="搜索日志内容" autocomplete="off">
-                            <kbd>Ctrl K</kbd>
-                        </label>
-                    </div>
-                    <div class="log-actions">
-                        <div>
+                        <div class="log-actions">
                             <button class="button compact secondary" id="streamBtn" type="button"><svg><use href="#i-pause"/></svg><span>暂停显示</span></button>
                             <button class="button compact secondary" id="loadHistoryBtn" type="button"><svg><use href="#i-history"/></svg><span>加载历史</span></button>
                             <button class="button compact ghost" id="clearLogsBtn" type="button"><svg><use href="#i-trash"/></svg><span>清空视图</span></button>
                         </div>
-                        <label class="check-control" for="autoScroll"><input id="autoScroll" type="checkbox" checked><span><svg><use href="#i-check"/></svg></span>自动滚动</label>
+                        <div class="log-toolbar-end">
+                            <label class="check-control" for="autoScroll"><input id="autoScroll" type="checkbox" checked><span><svg><use href="#i-check"/></svg></span>自动滚动</label>
+                            <label class="search-box" for="logSearch">
+                                <svg><use href="#i-search"/></svg>
+                                <input id="logSearch" type="search" placeholder="搜索日志" autocomplete="off">
+                                <kbd>Ctrl K</kbd>
+                            </label>
+                        </div>
                     </div>
                     <div class="log-viewport" id="logViewport">
                         <div class="log-empty" id="logEmpty">
@@ -560,8 +870,8 @@
                         <div class="log-lines" id="logLines" aria-live="polite"></div>
                     </div>
                     <footer class="log-footer">
-                        <span id="logCount">可见 0 行 / 缓冲 0 行</span>
-                        <span>最多缓冲 5,000 行</span>
+                        <span id="logCount">已显示 0 行</span>
+                        <span id="logMoreHint">滚到底部加载更早 · 停在顶部跟随最新</span>
                     </footer>
                 </article>
             </section>
@@ -569,8 +879,8 @@
             <section class="page" id="page-config" data-page="config">
                 <header class="page-header">
                     <div>
-                        <h1>连接配置</h1>
-                        <p class="page-description" id="configPageDesc">配置中继目标、应用进程和模型替换规则。</p>
+                        <h1>设置</h1>
+                        <p class="page-description" id="configPageDesc">连接、程序路径和本地证书。</p>
                     </div>
                     <button class="button primary" id="saveConfigBtn" type="submit" form="configForm">
                         <svg><use href="#i-save"/></svg><span>保存配置</span>
@@ -578,51 +888,66 @@
                 </header>
 
                 <div class="page-scroll config-scroll">
-                    <form id="configForm" novalidate>
-                        <article class="form-section" id="relaySection">
-                            <div class="form-section-aside">
-                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-server"/></svg>中继连接</h3>
-                                <p>请求将发送到该服务。地址应包含协议与端口。</p>
-                            </div>
-                            <div class="form-fields">
-                                <label class="form-field full"><span>中继地址</span><input id="relayUrl" type="url" placeholder="http://127.0.0.1:5001" spellcheck="false"></label>
-                                <label class="form-field full">
-                                    <span class="field-between"><span>鉴权 Token <em>可选</em></span><button class="field-action" id="toggleTokenBtn" type="button"><svg><use href="#i-eye"/></svg>显示</button></span>
-                                    <input id="authToken" type="password" autocomplete="off" spellcheck="false">
-                                </label>
-                            </div>
-                        </article>
-
-                        <article class="form-section">
-                            <div class="form-section-aside">
-                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-terminal"/></svg>Devin 程序</h3>
-                                <p>只用于启动拦截后自动重启，不再按进程做中间人拦截。</p>
-                            </div>
-                            <div class="form-fields">
-                                <label class="form-field full">
-                                    <span class="field-between"><span>Devin 程序路径</span><button class="field-action" id="scanProcessesBtn" type="button"><svg><use href="#i-scan"/></svg>扫描</button></span>
-                                    <span class="input-action-wrap"><input id="devinExecutable" type="text" spellcheck="false"><button id="browseDevinBtn" type="button" aria-label="浏览程序"><svg><use href="#i-folder"/></svg></button></span>
-                                    <small>打开软件时会自动扫描常见安装位置；找不到再点扫描或手动选择。</small>
-                                </label>
-                            </div>
-                        </article>
-
-                        <article class="form-section">
-                            <div class="form-section-aside">
-                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-route"/></svg>模型路由</h3>
-                                <p>模型在工作台的模型墙中点选，即时生效。</p>
-                            </div>
-                            <div class="form-fields">
-                                <div class="form-field full">
-                                    <span>当前上游模型</span>
-                                    <div class="model-current">
-                                        <strong id="configModelName">—</strong>
-                                        <span class="billing-chip" id="configModelBilling" data-tier="paid">收费</span>
-                                        <button class="field-action" id="gotoModelWallBtn" type="button">去工作台切换</button>
-                                    </div>
+                    <form id="configForm" class="settings-form" novalidate>
+                        <div class="settings-card">
+                            <div class="settings-row" id="uiScaleSection">
+                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-monitor"/></svg>界面缩放</h3>
+                                <div class="segment-control ui-scale-control" id="uiScaleControl" role="group" aria-label="界面缩放">
+                                    <button type="button" data-ui-scale="80" aria-pressed="false">80%</button>
+                                    <button type="button" data-ui-scale="90" aria-pressed="false">90%</button>
+                                    <button type="button" data-ui-scale="100" aria-pressed="false">100%</button>
+                                    <button type="button" data-ui-scale="110" aria-pressed="false">110%</button>
+                                    <button type="button" data-ui-scale="120" aria-pressed="false">120%</button>
                                 </div>
                             </div>
-                        </article>
+
+                            <div class="settings-row settings-row-fields" id="relaySection">
+                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-server"/></svg>中继连接</h3>
+                                <div class="settings-fields">
+                                    <label class="form-field"><span>中继地址</span><input id="relayUrl" type="url" placeholder="http://127.0.0.1:5001" spellcheck="false"></label>
+                                    <label class="form-field">
+                                        <span class="field-between"><span>鉴权 Token <em>可选</em></span><button class="field-action" id="toggleTokenBtn" type="button"><svg><use href="#i-eye"/></svg>显示</button></span>
+                                        <input id="authToken" type="password" autocomplete="off" spellcheck="false">
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-row">
+                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-terminal"/></svg>Devin 程序</h3>
+                                <div class="settings-path">
+                                    <span class="input-action-wrap"><input id="devinExecutable" type="text" spellcheck="false" aria-label="Devin 程序路径"><button id="browseDevinBtn" type="button" aria-label="浏览程序"><svg><use href="#i-folder"/></svg></button></span>
+                                    <button class="button compact secondary" id="scanProcessesBtn" type="button"><svg><use href="#i-scan"/></svg><span>扫描</span></button>
+                                </div>
+                            </div>
+                            <div class="config-location"><svg><use href="#i-info"/></svg><span id="configPath">配置文件位置：—</span></div>
+                        </div>
+
+                        <div class="settings-card behavior-card">
+                            <div class="settings-section-title">
+                                <h3><svg class="section-heading-icon" aria-hidden="true"><use href="#i-sliders"/></svg>客户端行为</h3>
+                            </div>
+                            <label class="behavior-row" for="closeToTrayToggle">
+                                <span>
+                                    <strong>关闭窗口时最小化到托盘</strong>
+                                    <small>关闭则点击关闭按钮直接退出</small>
+                                </span>
+                                <span class="switch"><input id="closeToTrayToggle" data-option="close_to_tray" type="checkbox"><span></span></span>
+                            </label>
+                            <label class="behavior-row" for="launchAtLoginToggle">
+                                <span>
+                                    <strong>开机自启</strong>
+                                    <small>以当前用户身份随系统启动</small>
+                                </span>
+                                <span class="switch"><input id="launchAtLoginToggle" data-option="launch_at_login" type="checkbox"><span></span></span>
+                            </label>
+                            <label class="behavior-row" for="blockDevinUpdateToggle">
+                                <span>
+                                    <strong>关闭 Devin 更新</strong>
+                                    <small>下次启动 Devin 时不再检查更新</small>
+                                </span>
+                                <span class="switch"><input id="blockDevinUpdateToggle" data-option="block_devin_update" type="checkbox" checked><span></span></span>
+                            </label>
+                        </div>
 
                         <article class="advanced-section" id="advancedSection">
                             <button class="advanced-trigger" id="advancedTrigger" type="button" aria-expanded="false">
@@ -641,49 +966,30 @@
                             </div>
                         </article>
                     </form>
-                    <div class="config-location"><svg><use href="#i-info"/></svg><span id="configPath">配置文件位置：—</span></div>
-                </div>
-            </section>
 
-            <section class="page" id="page-cert" data-page="cert">
-                <header class="page-header">
-                    <div>
-                        <h1>证书管理</h1>
-                        <p class="page-description">管理本地根证书，使 HTTPS 应用流量能够被本地拦截服务处理。</p>
-                    </div>
-                </header>
-
-                <div class="page-scroll certificate-scroll">
-                    <article class="certificate-hero" id="certificateHero" data-state="checking">
-                        <div class="certificate-seal"><svg><use href="#i-certificate"/></svg></div>
-                        <div class="certificate-copy">
-                            
-                            <h2 id="certificateTitle"><svg class="section-heading-icon" aria-hidden="true"><use href="#i-shield"/></svg>正在检查系统信任</h2>
-                            <p id="certificateDescription">正在读取证书文件和 Windows 根证书存储。</p>
+                    <article class="settings-card cert-card" id="certificateHero" data-state="checking">
+                        <div class="settings-row">
+                            <div class="cert-title">
+                                <span class="certificate-seal"><svg><use href="#i-certificate"/></svg></span>
+                                <div class="certificate-copy">
+                                    <h2 id="certificateTitle">正在检查系统信任</h2>
+                                    <p id="certificateDescription">正在读取本机证书。</p>
+                                </div>
+                            </div>
+                            <span class="badge neutral" id="certificateBadge">检测中</span>
                         </div>
-                        <span class="badge neutral" id="certificateBadge">检测中</span>
-                    </article>
-
-                    <article class="panel certificate-panel">
-                        <div class="certificate-details">
-                            <div class="detail-row"><span>证书文件</span><strong id="certFileText">检测中</strong><span class="badge neutral" id="certFileBadge">检测中</span></div>
-                            <div class="detail-row"><span>系统根证书</span><strong id="certInstallText">检测中</strong><span class="badge neutral" id="certInstallBadge">检测中</span></div>
-                            <div class="detail-row path-row"><span>文件位置</span><code id="certPath">—</code></div>
-                        </div>
+                        <code class="cert-path" id="certPath">—</code>
                         <div class="certificate-actions">
                             <button class="button primary" id="installCertBtn" type="button"><svg><use href="#i-shield"/></svg><span>安装证书</span></button>
                             <button class="button danger" id="uninstallCertBtn" type="button"><svg><use href="#i-trash"/></svg><span>卸载证书</span></button>
                         </div>
                         <div class="certificate-result" id="certificateResult" hidden></div>
                     </article>
-
-                    <div class="security-note">
-                        <svg><use href="#i-info"/></svg>
-                        <div><strong>仅信任本机生成的证书</strong><p>安装操作会写入 Windows“受信任的根证书颁发机构”，需要管理员权限。停止使用本工具后可随时卸载。</p></div>
-                    </div>
+                    <p class="app-version" data-app-version></p>
                 </div>
             </section>
         </main>
+    </div>
     </div>
 
     <div class="modal-backdrop" id="modalBackdrop" hidden>
@@ -726,9 +1032,9 @@
         <form class="auth-card" id="authForm" novalidate data-mode="login">
             <div class="auth-head">
                 <div class="brand-mark" aria-hidden="true">
-                    <svg viewBox="0 0 36 36"><path d="M4 27 13 14l5 6 4-4 10 11"/><path d="M9 9.5h4M22 8h6"/></svg>
+                    <svg viewBox="0 0 36 36"><path d="M18 5 29.3 11.5v13L18 31 6.7 24.5v-13z"/></svg>
                 </div>
-                <h2 id="authTitle">登录白岚</h2>
+                <h2 id="authTitle">登录 DevinHub</h2>
                 <p id="authSubtitle">使用 QQ 邮箱账号登录后即可使用</p>
             </div>
             <div class="segment-control auth-tabs" role="tablist">
@@ -738,7 +1044,7 @@
 
             <label class="avatar-picker auth-register-only" id="avatarPicker" title="选择头像">
                 <span class="avatar avatar-xl" id="avatarPreview"><svg><use href="#i-user"/></svg></span>
-                <span class="avatar-picker-copy"><strong>上传头像</strong><small>必填 · jpg / png / webp / gif · ≤ 2MB</small></span>
+                <span class="avatar-picker-copy"><strong>上传头像</strong><small>可选 · jpg / png / webp / gif · ≤ 2MB</small></span>
                 <input type="file" id="avatarInput" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
             </label>
 
@@ -747,7 +1053,10 @@
                 <input class="text-input" id="authEmail" type="email" autocomplete="username" placeholder="例如 123456789@qq.com" spellcheck="false">
             </div>
             <div class="form-field">
-                <label class="field-label" for="authPassword">密码</label>
+                <div class="field-between">
+                    <label class="field-label" for="authPassword">密码</label>
+                    <button class="auth-forgot auth-login-only" id="authForgotBtn" type="button">忘记密码？</button>
+                </div>
                 <input class="text-input" id="authPassword" type="password" autocomplete="current-password" placeholder="6 ~ 64 位">
             </div>
             <div class="form-field auth-register-only">
@@ -765,14 +1074,16 @@
             </div>
 
             <p class="auth-error" id="authError" role="alert"></p>
+            <p class="auth-hint" id="authHint" role="status"></p>
             <button class="button primary auth-submit" id="authSubmit" type="submit">登录</button>
         </form>
     </div>
 
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
-    <script src="native.js" defer></script>
-    <script src="theme.js" defer></script>
-    <script src="app.js" defer></script>
-    <script src="account.js" defer></script>
+    <script src="native.js?v=1" defer></script>
+    <script src="theme.js?v=1" defer></script>
+    <script src="ui-scale.js?v=1" defer></script>
+    <script src="app.js?v=85" defer></script>
+    <script src="account.js?v=3" defer></script>
 </body>
 </html>

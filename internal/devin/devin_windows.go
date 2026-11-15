@@ -3,6 +3,7 @@
 package devin
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,15 +15,12 @@ import (
 	"bailan-relay/internal/sysutil"
 )
 
-const defaultExecutable = `E:\Devin\Devin.exe`
-
 // DiscoverExecutable 查找 Devin.exe，找不到返回空串。
 // 分级探测、逐级惰性执行：已配置路径与常见目录 stat（零进程调用）→ 运行中进程 →
 // 注册表安装记录 → 固定磁盘常见目录扫描。任一级命中即返回，常见场景毫秒级完成。
 func DiscoverExecutable(configured string) string {
-	// 第 1 级：已配置路径 + 历史/标准安装目录（纯 stat，零开销）。
+	// 第 1 级：已配置路径 + 标准安装目录（纯 stat，零开销）。
 	fast := []string{strings.TrimSpace(configured),
-		defaultExecutable,
 		filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Devin", "Devin.exe"),
 		filepath.Join(defaultProgramFiles(), "Devin", "Devin.exe"),
 	}
@@ -169,6 +167,7 @@ func defaultProgramFiles() string {
 }
 
 // launch 写出启动脚本，经 explorer 以普通用户权限（降权）启动 Devin。
+// 用 wscript 而不是 cmd：cmd 会带出命令行窗口，启动时还会再闪一次 chcp。
 func launch(devinExe string) error {
 	launcher, err := writeLauncher(devinExe)
 	if err != nil {
@@ -177,21 +176,28 @@ func launch(devinExe string) error {
 	return sysutil.StartDetached(filepath.Dir(devinExe), "explorer.exe", launcher)
 }
 
+func vbsString(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
 func writeLauncher(devinExe string) (string, error) {
-	launcher := filepath.Join(config.AppDir(), "launch_devin.cmd")
-	lines := []string{"@echo off"}
+	launcher := filepath.Join(config.AppDir(), "launch_devin.vbs")
+	var b strings.Builder
+	b.WriteString("Set sh = CreateObject(\"Wscript.Shell\")\r\n")
 	for _, kv := range launchEnv {
-		lines = append(lines, "set "+kv)
+		key, val, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(&b, "sh.Environment(\"Process\").Item(%s) = %s\r\n", vbsString(key), vbsString(val))
 	}
-	lines = append(lines,
-		`cd /d "`+filepath.Dir(devinExe)+`"`,
-		`start "" "`+devinExe+`" `+windowsArgs(),
-	)
-	content := strings.Join(lines, "\r\n") + "\r\n"
+	fmt.Fprintf(&b, "sh.CurrentDirectory = %s\r\n", vbsString(filepath.Dir(devinExe)))
+	command := `"` + devinExe + `" ` + windowsArgs()
+	fmt.Fprintf(&b, "sh.Run %s, 1, False\r\n", vbsString(command))
 	if err := os.MkdirAll(config.AppDir(), 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(launcher, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(launcher, []byte(b.String()), 0o644); err != nil {
 		return "", err
 	}
 	return launcher, nil

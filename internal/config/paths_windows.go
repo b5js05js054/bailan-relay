@@ -15,7 +15,7 @@ var DefaultInterceptProcesses = []string{
 	"language_server_windows_x64.exe",
 }
 
-func defaultDevinExecutable() string { return `E:\Devin\Devin.exe` }
+func defaultDevinExecutable() string { return "" }
 
 var (
 	appDir     string

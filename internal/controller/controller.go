@@ -163,6 +163,13 @@ func (c *Controller) statusSnapshot() map[string]any {
 	return out
 }
 
+// setAdaptation 记下最近一次对 Devin 的适配结果，供界面显示「适配状态」。
+func (c *Controller) setAdaptation(report devin.PatchReport) {
+	c.statusMu.Lock()
+	c.status["adaptation"] = report
+	c.statusMu.Unlock()
+}
+
 func (c *Controller) setProxyState(state, message string, running *bool) {
 	c.statusMu.Lock()
 	defer c.statusMu.Unlock()
@@ -373,6 +380,9 @@ func (c *Controller) publicConfig(cfg config.Config) map[string]any {
 		"model_options":          cfg.ModelOptions,
 		"show_mitmweb":           false,
 		"restart_devin_on_start": cfg.RestartDevinOnStart,
+		"close_to_tray":          cfg.CloseToTray,
+		"launch_at_login":        cfg.LaunchAtLogin,
+		"block_devin_update":     cfg.BlockDevinUpdate,
 		"license_api_url":        cfg.LicenseAPIURL,
 	}
 	if config.IsCustomer() {
@@ -402,6 +412,8 @@ func exportStatusForEdition(out map[string]any) map[string]any {
 	if !config.IsCustomer() || out == nil {
 		return out
 	}
+	// 适配状态是给你自己看的开发信息，客户版保持安静，不下发。
+	delete(out, "adaptation")
 	checking, _ := out["relay_checking"].(bool)
 	ok, _ := out["relay_ok"].(bool)
 	switch {

@@ -3,21 +3,32 @@
 package config
 
 import (
+	"context"
+	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
-// AppTitle 应用标题。
-const AppTitle = "Devin_hub"
+// AppTitle 产品名：窗口标题、托盘提示、界面里的版本行都用这一个，和官网保持一致。
+const AppTitle = "DevinHub"
+
+// AutostartValueName 是当前用户开机启动项的名字。客户版和完整版分开，避免互相覆盖。
+func AutostartValueName() string {
+	if IsCustomer() {
+		return "白岚 Devin 中继"
+	}
+	return "白岚 Devin 中继完整版"
+}
 
 // UIVersion 上报给前端的界面版本号。
 const UIVersion = "3.0"
 
 // AppVersion 客户端程序版本号，用于远程更新检查。
 // 可通过链接期注入：-ldflags "-X bailan-relay/internal/config.AppVersion=1.0.1"
-var AppVersion = "1.2.9"
+var AppVersion = "2.0.0"
 
 // Edition 区分构建版本：
 //   - "full"     完整版（默认，开发/自用，展示全部信息）
@@ -55,10 +66,20 @@ type Model struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Free  bool   `json:"free"`
-	// 以下由后台模型目录下发，仅用于展示：Ratio 为倍率（0=免费），PriceIn/PriceOut 为每 100 万 tokens 的价格。
-	Ratio    float64 `json:"ratio"`
-	PriceIn  float64 `json:"price_in"`
-	PriceOut float64 `json:"price_out"`
+	// 以下由后台模型目录下发，仅用于展示。
+	// Price* 已是每 100 万 tokens 的现价（含分组倍率）。角标用分组名和分组倍率，不要再用 Ratio 乘一次。
+	Ratio              float64 `json:"ratio"`
+	CompletionRatio    float64 `json:"completion_ratio,omitempty"`
+	CacheRatio         float64 `json:"cache_ratio,omitempty"`
+	CacheWriteRatio    float64 `json:"cache_write_ratio,omitempty"`
+	PriceIn            float64 `json:"price_in"`
+	PriceOut           float64 `json:"price_out"`
+	PriceCache         float64 `json:"price_cache,omitempty"`
+	PriceCacheWrite    float64 `json:"price_cache_write,omitempty"`
+	CategoryName       string  `json:"category_name,omitempty"`
+	CategoryMultiplier float64 `json:"category_multiplier,omitempty"`
+	// PriceTiers 有定时调价（如 DeepSeek 峰谷）时给出高峰/空闲两档，Active 是此刻生效的那档。
+	PriceTiers *PriceTiers `json:"price_tiers,omitempty"`
 	// BillingMode = "request" 时按次计费，PriceRequest 为每次价格；TierThreshold/TierRatio 为长上下文阶梯。
 	BillingMode   string  `json:"billing_mode,omitempty"`
 	PriceRequest  float64 `json:"price_request,omitempty"`
@@ -71,6 +92,21 @@ type Model struct {
 	// 用户可在客户端选择的思考强度 / 上下文档位（token）；空 = 不提供该选项。
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	ContextOptions   []int    `json:"context_options,omitempty"`
+}
+
+// PriceTier 是某一档的四个单价，已经乘过分组倍率。
+type PriceTier struct {
+	PriceIn         float64 `json:"price_in"`
+	PriceOut        float64 `json:"price_out"`
+	PriceCache      float64 `json:"price_cache"`
+	PriceCacheWrite float64 `json:"price_cache_write"`
+}
+
+// PriceTiers 高峰/空闲两档。Active 为 "peak" 或 "off"。
+type PriceTiers struct {
+	Active string    `json:"active"`
+	Peak   PriceTier `json:"peak"`
+	Off    PriceTier `json:"off"`
 }
 
 // ModelOption 用户为某个模型保存的选择；零值 = 使用渠道默认 / 模型上限。
@@ -98,14 +134,19 @@ func ValidModelOption(modelID string, opt ModelOption) ModelOption {
 	}
 	var out ModelOption
 	for _, e := range m.ReasoningEfforts {
-		if e == opt.Effort {
+		if strings.EqualFold(e, opt.Effort) {
 			out.Effort = e
+			break
 		}
 	}
 	for _, c := range m.ContextOptions {
 		if c == opt.Context {
 			out.Context = c
+			break
 		}
+	}
+	if out.Context == 0 && opt.Context > 0 && opt.Context == m.ContextWindow {
+		out.Context = opt.Context
 	}
 	return out
 }
@@ -131,6 +172,10 @@ var (
 	modelLabels    = map[string]string{}
 	labelToID      = map[string]string{}
 	modelIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,79}$`)
+	// catalogEpoch 在后台模型目录内容变化时加一。
+	catalogEpoch   atomic.Uint64
+	catalogWaitMu  sync.Mutex
+	catalogWaiters []chan struct{}
 )
 
 func init() {
@@ -180,7 +225,7 @@ func SetSelectableModels(models []Model) {
 		clean = append(clean, m)
 	}
 	modelMu.Lock()
-	defer modelMu.Unlock()
+	previous := catalogFingerprint(runtimeModels)
 	if len(clean) == 0 {
 		runtimeModels = append([]Model(nil), SelectableModels...)
 		catalogSynced = false
@@ -189,6 +234,72 @@ func SetSelectableModels(models []Model) {
 		catalogSynced = true
 	}
 	rebuildModelMapsLocked()
+	changed := catalogFingerprint(runtimeModels) != previous
+	modelMu.Unlock()
+	if changed {
+		catalogEpoch.Add(1)
+		notifyCatalogChanged()
+	}
+}
+
+// CatalogEpoch 返回模型目录版本。内容没变时保持原值。
+func CatalogEpoch() uint64 {
+	return catalogEpoch.Load()
+}
+
+// WaitCatalogChange 等到目录版本离开 seen。hasSeen 为 false 时立刻返回当前版本，供 Devin 记住起点。
+// 版本变化由本机叫醒正在等的 Devin，不是让 Devin 反复来问。
+func WaitCatalogChange(ctx context.Context, seen uint64, hasSeen bool) uint64 {
+	current := CatalogEpoch()
+	if !hasSeen || current != seen {
+		return current
+	}
+	ch := make(chan struct{})
+	catalogWaitMu.Lock()
+	current = CatalogEpoch()
+	if current != seen {
+		catalogWaitMu.Unlock()
+		return current
+	}
+	catalogWaiters = append(catalogWaiters, ch)
+	catalogWaitMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		removeCatalogWaiter(ch)
+		return CatalogEpoch()
+	case <-ch:
+		return CatalogEpoch()
+	}
+}
+
+func notifyCatalogChanged() {
+	catalogWaitMu.Lock()
+	waiters := catalogWaiters
+	catalogWaiters = nil
+	catalogWaitMu.Unlock()
+	for _, ch := range waiters {
+		close(ch)
+	}
+}
+
+func removeCatalogWaiter(ch chan struct{}) {
+	catalogWaitMu.Lock()
+	defer catalogWaitMu.Unlock()
+	for i, waiter := range catalogWaiters {
+		if waiter == ch {
+			catalogWaiters = append(catalogWaiters[:i], catalogWaiters[i+1:]...)
+			return
+		}
+	}
+}
+
+func catalogFingerprint(models []Model) string {
+	raw, err := json.Marshal(models)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 // CatalogSynced 返回当前模型目录是否来自授权后台。
@@ -221,6 +332,8 @@ var DefaultTargetDomains = []string{
 	"api.codeium.com",
 	"inference.codeium.com",
 	"southcentral-lb.codeium.com",
+	"api.devin.ai",
+	"app.devin.ai",
 }
 
 // DefaultTargetPaths 默认转发到中继的 API 路径。
@@ -269,7 +382,13 @@ type Config struct {
 	OverrideModel       string   `json:"override_model"`
 	ShowMitmweb         bool     `json:"show_mitmweb"`
 	RestartDevinOnStart bool     `json:"restart_devin_on_start"`
-	MitmwebToken        string   `json:"mitmweb_token,omitempty"`
+	// CloseToTray 为真时，点关闭只把窗口藏进托盘，进程和拦截继续跑。
+	CloseToTray bool `json:"close_to_tray,omitempty"`
+	// LaunchAtLogin 为真时，写入当前用户的开机启动项。
+	LaunchAtLogin bool `json:"launch_at_login,omitempty"`
+	// BlockDevinUpdate 为真时，把 Devin 的 update.mode 写成 none。默认开启。
+	BlockDevinUpdate bool   `json:"block_devin_update"`
+	MitmwebToken     string `json:"mitmweb_token,omitempty"`
 	// LicenseAPIURL 卡密授权管理系统地址（激活/心跳）。
 	LicenseAPIURL string `json:"license_api_url"`
 	// ModelOptions 每个模型的思考强度 / 上下文选择（key = 模型 ID）。
@@ -290,6 +409,7 @@ func Default() Config {
 		OverrideModel:       DefaultOverrideModel,
 		ShowMitmweb:         false,
 		RestartDevinOnStart: true,
+		BlockDevinUpdate:    true,
 		LicenseAPIURL:       DefaultLicenseAPIURL,
 	}
 }

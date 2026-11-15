@@ -13,6 +13,7 @@ import (
 	"bailan-relay/internal/applog"
 	"bailan-relay/internal/certstore"
 	"bailan-relay/internal/config"
+	"bailan-relay/internal/connectframe"
 	"bailan-relay/internal/netdns"
 )
 
@@ -48,16 +49,17 @@ type Server struct {
 	resolver *netdns.Resolver
 	log      *applog.Logger
 
-	mu         sync.RWMutex
-	domains    map[string]bool
-	paths      map[string]bool
-	stub       []string
-	relayBase  string
-	relayToken string
-	model      string
-	modelOpts  map[string]config.ModelOption
-	relayClient  *http.Client
-	originClient *http.Client
+	mu            sync.RWMutex
+	domains       map[string]bool
+	paths         map[string]bool
+	stub          []string
+	relayBase     string
+	relayToken    string
+	model         string
+	modelOpts     map[string]config.ModelOption
+	sessionModels map[string]sessionChoice
+	relayClient   *http.Client
+	originClient  *http.Client
 
 	// tokenProvider 返回转发时携带的授权信息（令牌 / 卡密 / 设备）。
 	tokenProvider func() (token, cardKey, deviceID string)
@@ -68,6 +70,9 @@ type Server struct {
 
 	reconnect reconnectState
 	upload    uploader
+
+	catalogMu    sync.Mutex
+	catalogStamp string
 }
 
 // SetTokenProvider 注入授权令牌提供者（由 license.Manager 提供）。
@@ -202,6 +207,123 @@ func (s *Server) currentModel() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.model
+}
+
+type sessionChoice struct {
+	Model   string
+	Effort  string
+	Context int
+}
+
+// RememberSessionModel 记下某个会话点选的模型。转发时按请求里的会话编号取回。
+func (s *Server) RememberSessionModel(sessionID, model, effort string, context int) {
+	sessionID = strings.TrimSpace(sessionID)
+	model = config.NormalizeModelID(model)
+	if sessionID == "" || model == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.sessionModels == nil {
+		s.sessionModels = map[string]sessionChoice{}
+	}
+	choice := sessionChoice{Model: model, Effort: effort, Context: context}
+	s.sessionModels[sessionID] = choice
+	// 3.12.28 的请求里会把斜杠写成下划线：devin-acp_devin-cli_名字。
+	if strings.Contains(sessionID, "/") {
+		s.sessionModels[strings.ReplaceAll(sessionID, "/", "_")] = choice
+	}
+	// 请求里通常只有最后一段短名。同一会话再换模型时，短名必须跟着改，否则会一直用第一次选的模型。
+	if i := strings.LastIndex(sessionID, "/"); i >= 0 && i < len(sessionID)-1 {
+		s.sessionModels[sessionID[i+1:]] = choice
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) sessionChoice(ids []string) (sessionChoice, string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// 请求里经常同时出现好几个带横线的字符串。按出现顺序用第一条已经记住的编号，
+	// 不能改拿更长的那条，否则另一个会话的完整名字会把当前会话盖掉。
+	for _, id := range ids {
+		choice, ok := s.sessionModels[id]
+		if ok && choice.Model != "" {
+			return choice, id, true
+		}
+	}
+	var hitKey string
+	var hit sessionChoice
+	hits := 0
+	for _, id := range ids {
+		for key, choice := range s.sessionModels {
+			if choice.Model == "" || !strings.HasSuffix(key, "/"+id) {
+				continue
+			}
+			hits++
+			hitKey = key
+			hit = choice
+		}
+	}
+	if hits == 1 {
+		return hit, hitKey, true
+	}
+	return sessionChoice{}, "", false
+}
+
+// sessionChoiceFromBody 在请求体里找已经记住的会话名。
+// 3.12.28 的后续消息不再走模型按钮，编号字段也对不上斜杠形式，正文里仍有会话名。
+func (s *Server) sessionChoiceFromBody(body []byte) (sessionChoice, string, bool) {
+	if len(body) == 0 {
+		return sessionChoice{}, "", false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.sessionModels) == 0 {
+		return sessionChoice{}, "", false
+	}
+	text := string(connectframe.MessagePayload(body))
+	type hit struct {
+		key    string
+		choice sessionChoice
+	}
+	var hits []hit
+	for key, choice := range s.sessionModels {
+		if choice.Model == "" || len(key) < 8 || !strings.Contains(key, "-") {
+			continue
+		}
+		forms := []string{key}
+		if strings.Contains(key, "/") {
+			forms = append(forms, strings.ReplaceAll(key, "/", "_"))
+		}
+		for _, form := range forms {
+			if form != "" && strings.Contains(text, form) {
+				hits = append(hits, hit{key: key, choice: choice})
+				break
+			}
+		}
+	}
+	var kept []hit
+	for _, h := range hits {
+		covered := false
+		for _, other := range hits {
+			if other.key != h.key && (strings.HasSuffix(other.key, "/"+h.key) || strings.HasSuffix(other.key, "_"+h.key)) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			kept = append(kept, h)
+		}
+	}
+	if len(kept) == 0 {
+		return sessionChoice{}, "", false
+	}
+	first := kept[0].choice
+	for _, h := range kept[1:] {
+		if h.choice.Model != first.Model || h.choice.Effort != first.Effort || h.choice.Context != first.Context {
+			return sessionChoice{}, "", false
+		}
+	}
+	return first, kept[0].key, true
 }
 
 func (s *Server) snapshot() (map[string]bool, map[string]bool, []string, string, string) {

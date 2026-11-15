@@ -25,6 +25,7 @@ import (
 	"bailan-relay/internal/certstore"
 	"bailan-relay/internal/config"
 	"bailan-relay/internal/controller"
+	"bailan-relay/internal/devin"
 	"bailan-relay/internal/hostsfile"
 	"bailan-relay/internal/license"
 	"bailan-relay/internal/netdns"
@@ -106,6 +107,10 @@ func main() {
 
 	// restoreSystem 退出收尾：恢复 hosts、代理绕过列表，并卸载根证书。
 	restoreSystem := func() {
+		_, _ = devin.Stop(config.Load().DevinExecutable)
+		if _, msg := devin.RestoreClientPatches(config.Load().DevinExecutable); msg != "" {
+			logger.Log("[Manager] " + msg)
+		}
 		_, _ = hostsfile.Restore()
 		_, _ = proxybypass.Restore(config.Load().HijackDomains())
 		if sysutil.IsAdmin() {
@@ -118,6 +123,13 @@ func main() {
 	}
 	ctrl.SetOnExit(restoreSystem)
 	sysutil.SetConsoleCleanup(cleanup)
+
+	if err := sysutil.SetLaunchAtLogin(config.Load().LaunchAtLogin); err != nil {
+		logger.Log("[Manager] 开机自启未更新：" + err.Error())
+	}
+	if err := devin.SetUpdateBlocked(config.Load().BlockDevinUpdate); err != nil {
+		logger.Log("[Manager] Devin 更新设置未写入：" + err.Error())
+	}
 
 	if os.Getenv("BAILAN_NO_BROWSER") != "1" {
 		if openAppWindow(url) {
@@ -132,7 +144,7 @@ func main() {
 		// 内嵌窗口不可用：退回浏览器打开。
 		openBrowser(url)
 	}
-	fmt.Println("白岚 Devin 中继已启动：" + url)
+	fmt.Println(config.AppTitle + " 已启动：" + url)
 	fmt.Println("关闭此窗口即可退出（会自动恢复 hosts）。")
 
 	// 等待退出信号，收尾恢复 hosts。

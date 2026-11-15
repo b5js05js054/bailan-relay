@@ -5,6 +5,7 @@
 *.bat  text eol=crlf
 *.go   text eol=lf
 *.md   text eol=lf
+internal/devin/patchdata/*.txt text eol=lf
 
 *.ico  binary
 *.png  binary

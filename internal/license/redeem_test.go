@@ -103,6 +103,9 @@ func TestRedeemWithoutCardSendsNoCardKey(t *testing.T) {
 		if _, has := body["card_key"]; has {
 			t.Errorf("未激活时不应携带 card_key: %v", body)
 		}
+		if body["device_id"] != "dev" {
+			t.Errorf("应带上本机 device_id: %v", body)
+		}
 		_, _ = w.Write([]byte(`{"ok":true,"message":"充值成功","balance":10,"billing_enabled":true,"currency":"¥"}`))
 	}))
 	defer srv.Close()

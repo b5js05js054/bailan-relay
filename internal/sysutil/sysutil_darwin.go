@@ -240,3 +240,11 @@ func GUIUser() (*user.User, error) {
 	}
 	return user.Lookup(name)
 }
+
+// SetLaunchAtLogin 在 macOS 上暂不写登录项。关闭时直接成功。
+func SetLaunchAtLogin(enabled bool) error {
+	if enabled {
+		return errors.New("当前系统不支持开机自启")
+	}
+	return nil
+}
